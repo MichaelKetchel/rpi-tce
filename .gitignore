@@ -1,0 +1,5 @@
+*artifacts/
+*sources/
+kernel/linux
+kernel/kernel_source
+work

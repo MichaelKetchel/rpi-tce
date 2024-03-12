@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -e 
+source ./common.sh
+
+MNT_PATH="$WORK_PATH/mnt/"
+BOOT_PATH="$MNT_PATH/boot"
+DATA_PATH="$MNT_PATH/data"
+
+KERNEL_ARTIFACTS_PATH="$SCRIPT_PATH/kernel/artifacts"
+KEXEC_ARTIFACTS_PATH="$SCRIPT_PATH/kexec/artifacts"
+ARTIFACTS_PATH="$SCRIPT_PATH/artifacts"
+BASE_IMAGE="piCore64-14.1.0"
+
+
+NEW_IMAGE_PATH=$WORK_PATH/$NEW_IMAGE_NAME.img
+BASE_IMAGE_PATH=$WORK_PATH/$BASE_IMAGE.img
+
+# Build kernel
+# $SCRIPT_PATH/kernel/get_sources.sh
+# $SCRIPT_PATH/kernel/build_kernel.sh
+
+# Build kexec tcz
+# $SCRIPT_PATH/kexec/get_sources.sh
+# $SCRIPT_PATH/kexec/run_remote_build.sh
+
+# $SCRIPT_PATH/get_sources.sh
+
+cd $SOURCES_PATH
+wget -nc http://tinycorelinux.net/14.x/aarch64/releases/RPi/$BASE_IMAGE.zip
+
+mkdir -p $WORK_PATH
+cd $WORK_PATH
+
+
+# mkdir 
+# sudo find | sudo cpio -o -H newc | gzip -2 > ../tinycore.gz
+
+# unzip exiting image
+unzip -o $SOURCES_PATH/$BASE_IMAGE.zip -d $WORK_PATH
+# mount
+mkdir -p $MNT_PATH
+
+
+# Unmount, just in case
+echo "Pre-emptively unmounting"
+sudo umount -q "$BOOT_PATH" || true
+sudo umount -q "$DATA_PATH" || true
+
+# # Mount image
+# while IFS=';' read -ra PART_LINES; do
+#   for PART_LINE in "${PART_LINES[@]:1}"; do
+#     # echo "Line: $PART_LINE"
+#     PART_NUM=$(echo "${PART_LINE}" | gawk 'BEGIN {RS="partition"} NR > 1 { print  $1 }' )
+#     PART_START=$(echo "${PART_LINE}" | grep -Po '(?<=startsector )(\d+)')
+#     PART_TYPE=$(echo "${PART_LINE}" | gawk 'BEGIN {RS="ID="}  NR > 1 {print $1}' | sed -e 's/,//')
+#     PART_SIZE=$(echo "${PART_LINE}" | grep -Po '(\d+)(?= sectors)')
+#     # process "$i"
+#     echo "$PART_NUM -> $PART_START <-> $PART_SIZE : $PART_TYPE"
+
+#     # If boot
+#     if [[ "$PART_TYPE" == "0xc" ]]; then
+#       echo "Mounting boot"
+#       sudo mkdir -p "$BOOT_PATH"
+#       sudo mount -o rw,sync,offset=$(( $PART_START * 512 )),sizelimit=$(( $PART_SIZE * 512 )) $BASE_IMAGE.img "$BOOT_PATH"
+#     fi
+
+#     # If data
+#     if [[ "$PART_TYPE" == "0x83" ]]; then
+#       echo "Mounting data"
+#       sudo mkdir -p "$DATA_PATH"
+#       sudo mount -o rw,sync,offset=$(( $PART_START * 512 )),sizelimit=$(( $PART_SIZE * 512 )) $BASE_IMAGE.img "$DATA_PATH"
+#     fi
+
+#   done
+# done <<< "$(file $BASE_IMAGE.img)"
+
+# Create new image with bigger size.
+
+TCE_ROOTFS_TYPE="ext4"
+TCE_PART_SIZE="131072" #128MB
+# Boot partition size [in KiB] (will be rounded up to IMAGE_ROOTFS_ALIGNMENT)
+BOOT_PART_SIZE="131072" # 128MB
+# Set alignment to 4MB [in KiB]
+IMAGE_ROOTFS_ALIGNMENT="4096"
+
+BOOT_PART_SIZE_ALIGNED=$(( BOOT_PART_SIZE + IMAGE_ROOTFS_ALIGNMENT - 1 ))
+BOOT_PART_SIZE_ALIGNED=$(( BOOT_PART_SIZE_ALIGNED - (( BOOT_PART_SIZE_ALIGNED % IMAGE_ROOTFS_ALIGNMENT)) ))
+
+SDIMG_SIZE=$(( IMAGE_ROOTFS_ALIGNMENT + BOOT_PART_SIZE_ALIGNED + TCE_PART_SIZE ))
+sudo dd if=/dev/zero of=${NEW_IMAGE_PATH} bs=1024 count=0 seek=${SDIMG_SIZE}
+
+BOOT_PARTITION_START="${IMAGE_ROOTFS_ALIGNMENT}"
+BOOT_PARTITION_END=$(( BOOT_PART_SIZE_ALIGNED + IMAGE_ROOTFS_ALIGNMENT ))
+
+TRUNCATE_IMAGE_AFTER=${SDIMG_SIZE}
+
+
+# BOOT_PARTITION_END=$(( UBOOT_PARTITION_END + BOOT_PART_SIZE_ALIGNED ))
+rm -rf $NEW_IMAGE_PATH || true
+sudo dd if=/dev/zero of=$NEW_IMAGE_PATH bs=1024 count=0 seek=${SDIMG_SIZE}
+sudo parted -s ${NEW_IMAGE_PATH} mklabel msdos
+sudo parted -s ${NEW_IMAGE_PATH} unit KiB mkpart primary fat32 ${BOOT_PARTITION_START} ${BOOT_PARTITION_END}
+sudo parted -s ${NEW_IMAGE_PATH} set 1 boot on
+sudo parted -s ${NEW_IMAGE_PATH} -- unit KiB mkpart primary ${TCE_ROOTFS_TYPE} ${BOOT_PARTITION_END} -1s
+sudo parted ${NEW_IMAGE_PATH} print
+
+# Format partitions
+sudo kpartx -av "${NEW_IMAGE_PATH}"
+kpartx_res=$(sudo kpartx -av "${NEW_IMAGE_PATH}")
+print_title "$kpartx_res"
+
+
+# Get loop device name
+while IFS= read -r line;
+do
+  echo "LINE: '${line}'"
+  loopdev_name=$(grep -oP '(?<=add map ).*?(?=p1)' <<< "${line}")
+  if [ ! -z "$loopdev_name" ]; then
+      break
+  fi
+done <<< "$kpartx_res"
+
+print_title "loopdev_name: $loopdev_name"
+NEW_LOOPDEV="$loopdev_name"
+sudo mkfs.vfat -F32 -n BOOT "/dev/mapper/${NEW_LOOPDEV}p1"
+sudo mkfs.${TCE_ROOTFS_TYPE} -L TCE "/dev/mapper/${NEW_LOOPDEV}p2"
+# sudo parted "${NEW_IMAGE_PATH}" print
+
+# read -n 1 -p "New image basis created. Continue?"
+
+
+print_title "Mounting base image"
+
+
+sudo kpartx -av "${BASE_IMAGE_PATH}"
+kpartx_res=$(sudo kpartx -av "${BASE_IMAGE_PATH}")
+print_title "$kpartx_res"
+
+# Get loop device name
+while IFS= read -r line;
+do
+  echo "LINE: '${line}'"
+  loopdev_name=$(grep -oP '(?<=add map ).*?(?=p1)' <<< "${line}")
+  if [ ! -z "$loopdev_name" ]; then
+      break
+  fi
+done <<< "$kpartx_res"
+BASE_LOOPDEV="$loopdev_name"
+
+# Mount new base
+sudo mount -o rw,sync /dev/mapper/${NEW_LOOPDEV}p1 "$BOOT_PATH"
+
+
+# Copy data from base image to new one and extend.
+
+#sudo dd if=/dev/mapper/${BASE_LOOPDEV}p1 of=/dev/mapper/${NEW_LOOPDEV}p1
+print_title "Copying data from base image to new one"
+mkdir -p /tmp/basep1
+sudo mount /dev/mapper/${BASE_LOOPDEV}p1 /tmp/basep1
+sudo cp -ar /tmp/basep1/* "$BOOT_PATH"
+sudo umount /tmp/basep1
+
+
+sudo dd if=/dev/mapper/${BASE_LOOPDEV}p2 of=/dev/mapper/${NEW_LOOPDEV}p2
+# sudo fatresize /dev/mapper/${NEW_LOOPDEV}p1
+sudo e2fsck -fp /dev/mapper/${NEW_LOOPDEV}p2 || true
+sudo resize2fs /dev/mapper/${NEW_LOOPDEV}p2
+
+# Mount TCE
+sudo mount -o rw,sync /dev/mapper/${NEW_LOOPDEV}p2 "$DATA_PATH"
+
+# Detach base image
+sudo kpartx -dv "${BASE_IMAGE_PATH}"
+
+
+# read -n 1 -p "New image base created and populated. Continue?"
+
+# Clean out old stuff
+print_title "Cleaning old files..."
+sudo rm -rf $BOOT_PATH/*.dtb $BOOT_PATH/overlays $BOOT_PATH/kernel*.img $BOOT_PATH/modules-*.gz
+
+# Trim mounts
+print_title "Trimming filesystems..."
+sudo fstrim -v $BOOT_PATH
+sudo fstrim -v $DATA_PATH
+
+# Copy in new config and other stuff
+print_title "Copying in config..."
+MODULES_ARCHIVE=$(basename $(ls $KERNEL_ARTIFACTS_PATH/modules*.gz))
+sudo install -o root -g root -m 755 $SCRIPT_PATH/files/config.txt $BOOT_PATH/config.txt
+sudo sed -i "s/MODULES_ARCHIVE/${MODULES_ARCHIVE}/" $BOOT_PATH/config.txt
+sudo sed -i "s/KERNEL_IMG/kernel8.img/" $BOOT_PATH/config.txt
+
+# read -n 1 -p "Ready to copy kernel. Continue?"
+
+print_title "Copying in kernel, modules, and device tree files..."
+# sudo install -d -o root -g root -m 755 $BOOT_PATH/overlays
+sudo cp -ar $KERNEL_ARTIFACTS_PATH/boot/* $BOOT_PATH/
+sudo install -o root -g root -m 755 $SCRIPT_PATH/files/cmdline.txt $BOOT_PATH/cmdline.txt
+sudo install -o root -g root -m 755 $KERNEL_ARTIFACTS_PATH/modules*.gz $BOOT_PATH/
+
+# Install TCE packages
+print_title "Installing TCE packages..."
+sudo install -o 1001 -g games -m 664 $KEXEC_ARTIFACTS_PATH/kexec_package.tcz $DATA_PATH/tce/optional/kexec.tcz
+echo 'kexec.tcz' | sudo tee -a $DATA_PATH/tce/onboot.lst
+cd $DATA_PATH/tce/optional/
+md5sum kexec.tcz | sudo tee kexec.tcz.md5.txt
+sudo chown 1001:games kexec.tcz.md5.txt
+sudo chmod 644 kexec.tcz.md5.txt
+
+cd $WORK_PATH
+
+# Umount parts
+print_title "Unmounting and cleaning up..."
+sudo umount "$BOOT_PATH"
+sudo umount "$DATA_PATH"
+
+sudo kpartx -dv "${NEW_IMAGE_PATH}"
+
+# mv $BASE_IMAGE.img $NEW_IMAGE_NAME.img
+
+# for i in $(file $BASE_IMAGE.img|gawk 'BEGIN {RS="startsector"} NR > 1 {print $0*512}');do
+#     mount -o rw,offset=$i $BASE_IMAGE.img $where
+# done
+
+
+# deploy new kernel to boot
+# deploy other boof files to boot
+# deploy modules to boot
+# update config.txt
+# shouldn't need to mess with initrd yet
+# deploy kexec to tce optional or onboot
