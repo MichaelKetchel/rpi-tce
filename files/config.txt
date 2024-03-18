@@ -22,6 +22,7 @@ kernel KERNEL_IMG
 
 [CM4]
 otg_mode=1
+dtoverlay=dwc2,dr_mode=host
 
 [ALL]
 cmdline cmdline.txt
@@ -86,3 +87,4 @@ disable_fw_kms_setup=1
 #dtoverlay=vc4-kms-v3d
 enable_uart=1
 dtoverlay=disable-bt
+uart_2ndstage=1
