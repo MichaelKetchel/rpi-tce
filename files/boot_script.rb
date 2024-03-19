@@ -24,10 +24,10 @@ NO_BOOT_PATH="#{IMG_SERVER}/noboot"
 LOCAL_DATA_FILE="/mnt/mmcblk0p2/tce/bldata.json"
 
 $local_data = {
-    current_image_md5: nil,
-    last_flash_success: false,
-    boot_exec_times: [],
-    first_boot: true,
+    "current_image_md5" => nil,
+    "last_flash_success" => false,
+    "boot_exec_times" => [],
+    "first_boot" => true,
 }
 
 class SysExecError < StandardError
@@ -101,19 +101,18 @@ def flash_os_image
         puts "Fetching flash image"
         set_exit true
         
-        `wget #{IMG_SERVER}/#{IMGFILE} -P /tmp` unless File.file?("/tmp/#{IMGFILE}")
+        
         `wget #{IMG_SERVER}/#{IMGFILE}.md5.txt -P /tmp` unless File.file?("/tmp/#{IMGFILE}.md5.txt")
-        `cd /tmp; md5sum -c #{IMGFILE}.md5.txt;`
-        `cd #{STARTING_DIR};`
-
         new_md5 = `cat /tmp/#{IMGFILE}.md5.txt`.split[0]
-        if new_md5 == $local_data['current_image_md5'] && $local_data[:last_flash_success]
+        if new_md5 == $local_data["current_image_md5"] && $local_data["last_flash_success"]
             puts "Identical image already flashed successfully, skipping flash."
             return true
-        else 
-            puts "New image has MD5 has of #{new_md5}"
-            $local_data['current_image_md5'] = new_md5
         end
+        `wget #{IMG_SERVER}/#{IMGFILE} -P /tmp` unless File.file?("/tmp/#{IMGFILE}")
+        `cd /tmp; md5sum -c #{IMGFILE}.md5.txt;`
+        puts "New image has MD5 has of #{new_md5}"
+        $local_data["current_image_md5"] = new_md5
+        `cd #{STARTING_DIR};`
 
         # Get first chunks for img beginning
         puts "Reading image partition table"
@@ -232,15 +231,18 @@ end
 
 def do_boot
     puts "Deciding whether to boot"
-    unless $local_data[:last_flash_success]
-        puts "Last flash failed. Restarting to try again."
-        `sudo rebootp 1`
-    end
-    puts "Checking for noboot file..."
     no_boot = `curl -sf #{NO_BOOT_PATH}`
     result=$?.success?
+    puts "Checking for noboot file..."
     unless result and no_boot.strip.downcase =~ /true|1|yes/
+        puts "Checking if last flash succeeded"
+        unless $local_data["last_flash_success"]
+            puts "Last flash failed. Restarting to try again."
+            sleep 5
+            `sudo rebootp 1`
+        end
         puts "Booting..."
+        sleep 5
         `sudo rebootp 3`
     end
     puts "Not booting."
@@ -248,11 +250,11 @@ end
 
 # Load local data, make note of our boot time, and check the last n times to make sure we're not thrashing
 load_local_data
-$local_data[:boot_exec_times].append(Time.now)
-$local_data[:boot_exec_times] = $local_data[:boot_exec_times].last(BOOT_EXEC_MAX_ENTRIES)
+$local_data["boot_exec_times"].append(Time.now)
+$local_data["boot_exec_times"] = $local_data["boot_exec_times"].last(BOOT_EXEC_MAX_ENTRIES)
 # Handle first boot tasks like saving ssh keys
-if $local_data[:first_boot]
-    $local_data[:first_boot] = false
+if $local_data["first_boot"]
+    $local_data["first_boot"] = false
     save_local_data
     `filetool.sh -b`
 end
@@ -263,8 +265,9 @@ current_wait=0
 while !system('ifconfig eth0 | grep "inet addr:" > /dev/null 2>&1')
     puts "Waiting for address..."
     sleep 5
-    if current_wait > MAX_BOOT_ADDRESS_WAIT && $local_data[:last_flash_success]
+    if current_wait > MAX_BOOT_ADDRESS_WAIT && $local_data["last_flash_success"]
         puts "Maximum wait exceeded, booting old image."
+        sleep 5
         do_boot
     end
 end
@@ -275,7 +278,7 @@ should_flash = false unless $?.success?
 
 # Decide whether to pull and flash or just go straight to boot.
 if should_flash
-    $local_data[:last_flash_success] = flash_os_image     
+    $local_data["last_flash_success"] = flash_os_image     
 end
 save_local_data
 do_boot
