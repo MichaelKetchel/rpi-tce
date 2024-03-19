@@ -8,12 +8,19 @@ DATA_PATH="$MNT_PATH/data"
 
 KERNEL_ARTIFACTS_PATH="$SCRIPT_PATH/kernel/artifacts"
 KEXEC_ARTIFACTS_PATH="$SCRIPT_PATH/kexec/artifacts"
+REBOOTP_ARTIFACTS_PATH="$SCRIPT_PATH/rebootp/artifacts"
 ARTIFACTS_PATH="$SCRIPT_PATH/artifacts"
 BASE_IMAGE="piCore64-14.1.0"
+CORE_NAME="rootfs-piCore64-14.1.gz"
 
 
 NEW_IMAGE_PATH=$WORK_PATH/$NEW_IMAGE_NAME.img
 BASE_IMAGE_PATH=$WORK_PATH/$BASE_IMAGE.img
+
+sudo rm -rf $WORK_PATH/*
+for path in $WORK_PATH $MNT_PATH $BOOT_PATH $DATA_PATH; do
+  mkdir -p $path
+done
 
 # Build kernel
 # $SCRIPT_PATH/kernel/get_sources.sh
@@ -28,7 +35,14 @@ BASE_IMAGE_PATH=$WORK_PATH/$BASE_IMAGE.img
 cd $SOURCES_PATH
 wget -nc http://tinycorelinux.net/14.x/aarch64/releases/RPi/$BASE_IMAGE.zip
 
-mkdir -p $WORK_PATH
+# TODO: Get all required tcz files and deps:
+# http://tinycorelinux.net/14.x/aarch64/tcz/<tcz_file>
+# parted.tcz
+# ruby.tcz
+# gdbm.tcz
+
+
+
 cd $WORK_PATH
 
 
@@ -38,7 +52,8 @@ cd $WORK_PATH
 # unzip exiting image
 unzip -o $SOURCES_PATH/$BASE_IMAGE.zip -d $WORK_PATH
 # mount
-mkdir -p $MNT_PATH
+
+
 
 
 # Unmount, just in case
@@ -128,10 +143,7 @@ sudo mkfs.${TCE_ROOTFS_TYPE} -L TCE "/dev/mapper/${NEW_LOOPDEV}p2"
 
 # read -n 1 -p "New image basis created. Continue?"
 
-
 print_title "Mounting base image"
-
-
 sudo kpartx -av "${BASE_IMAGE_PATH}"
 kpartx_res=$(sudo kpartx -av "${BASE_IMAGE_PATH}")
 print_title "$kpartx_res"
@@ -201,12 +213,58 @@ sudo install -o root -g root -m 755 $KERNEL_ARTIFACTS_PATH/modules*.gz $BOOT_PAT
 
 # Install TCE packages
 print_title "Installing TCE packages..."
-sudo install -o 1001 -g games -m 664 $KEXEC_ARTIFACTS_PATH/kexec_package.tcz $DATA_PATH/tce/optional/kexec.tcz
-echo 'kexec.tcz' | sudo tee -a $DATA_PATH/tce/onboot.lst
+sudo cp -p $SCRIPT_PATH/files/tce/optional/* $DATA_PATH/tce/optional/
+sudo install -o 1001 -g 50 -m 664 $KEXEC_ARTIFACTS_PATH/kexec_package.tcz $DATA_PATH/tce/optional/kexec.tcz
+sudo install -o 1001 -g 50 -m 664 $REBOOTP_ARTIFACTS_PATH/rebootp.tcz $DATA_PATH/tce/optional/rebootp.tcz
+
+echo '''kexec.tcz
+ruby.tcz
+parted.tcz
+pciutils.tcz
+raspi-utils.tcz
+util-linux.tcz
+curl.tcz
+rebootp.tcz''' | sudo tee -a $DATA_PATH/tce/onboot.lst
+
+
 cd $DATA_PATH/tce/optional/
-md5sum kexec.tcz | sudo tee kexec.tcz.md5.txt
-sudo chown 1001:games kexec.tcz.md5.txt
-sudo chmod 644 kexec.tcz.md5.txt
+
+for filename in kexec rebootp; do
+  md5sum ${filename}.tcz | sudo tee ${filename}.tcz.md5.txt
+  sudo chown 1001:50 ${filename}.tcz.md5.txt
+  sudo chmod 644 ${filename}.tcz.md5.txt
+done
+
+# https://wiki.tinycorelinux.net/doku.php?id=wiki:remastering
+echo "Unpacking core.gz"
+mkdir $WORK_PATH/core
+cd $WORK_PATH/core
+zcat ${BOOT_PATH}/${CORE_NAME} | sudo cpio -i -H newc -d
+
+# read -n 1 -p "Ready to update core. Continue?"
+
+echo "Updating core"
+sudo sed -i 's|# /usr/sbin/startserial|/usr/sbin/startserial|g' opt/bootlocal.sh
+sudo echo 'if [ -x /home/tc/bootscript ]; then /home/tc/bootscript; else /opt/bootscript; fi' | sudo tee -a opt/bootlocal.sh
+sudo install -o 0 -g 50 -m 775 $SCRIPT_PATH/files/boot_script.rb opt/bootscript
+
+# read -n 1 -p "Ready to repack core. Continue?"
+
+echo "Repacking core"
+cd $WORK_PATH/core
+sudo find | sudo cpio -o -H newc | gzip -2 > ../${CORE_NAME}
+cd $WORK_PATH
+advdef -z4 ${CORE_NAME}
+
+echo "Replacing core"
+sudo cp -r ${WORK_PATH}/${CORE_NAME} ${BOOT_PATH}/${CORE_NAME}
+
+echo "Updating mydata.tgz"
+mkdir -p ${WORK_PATH}/mydata
+sudo tar --same-owner -xzvf ${DATA_PATH}/tce/mydata.tgz  -C ${WORK_PATH}/mydata/
+sudo install -o 0 -g 50 -m 775 $WORK_PATH/core/opt/bootlocal.sh  ${WORK_PATH}/mydata/opt/bootlocal.sh
+sudo tar -pczvf ${WORK_PATH}/mydata.tgz -C ${WORK_PATH}/mydata/ ./
+sudo install -o 1001 -g 50 -m 664 ${WORK_PATH}/mydata.tgz ${DATA_PATH}/tce/mydata.tgz
 
 cd $WORK_PATH
 
