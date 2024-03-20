@@ -1,5 +1,9 @@
 #!/usr/local/bin/ruby
 require 'json'
+require 'net/http'
+require 'net/https'
+require 'pp'
+require 'openssl'
 # Maybe could use /usr/bin/env ruby, but the above is the known path on TCE.
 
 def bigputs (args)
@@ -10,18 +14,19 @@ end
 BOOT_THRASH_THRESHOLD = 4
 BOOT_EXEC_MAX_ENTRIES = 10
 MAX_BOOT_ADDRESS_WAIT = 60
+RPI_MODEL = `cat /sys/firmware/devicetree/base/model | sed 's/\x0//g'`
 
 STARTING_DIR = File.expand_path(File.dirname(__FILE__))
-IMG_SERVER='http://192.170.1.51:8080'
-# IMGFILE="2023-12-11-raspios-bookworm-arm64-lite.img"
-# IMGFILE="piglet-0089_20240221-005554_9bf6837e.img"
 IMGFILE="piglet-0135_20240315-080026_cb70731d.img.gz"
 IMG_PATH="/tmp/#{IMGFILE}"
 BOOT_DEVICE="/dev/mmcblk0"
 BOOT_DATA_PART="#{BOOT_DEVICE}p2"
 IMG_BEGINNING_PATH="#{IMG_PATH}.begin"
-NO_BOOT_PATH="#{IMG_SERVER}/noboot"
 LOCAL_DATA_FILE="/mnt/mmcblk0p2/tce/bldata.json"
+
+$controller_url = nil
+$default_gateway = nil
+$no_boot_path = nil
 
 $local_data = {
     "current_image_md5" => nil,
@@ -29,6 +34,26 @@ $local_data = {
     "boot_exec_times" => [],
     "first_boot" => true,
 }
+
+def get_if_mac(ifname)
+    `ifconfig #{ifname}`.match(/(?<=HWaddr )((?:\w\w:){5}\w\w)/)[1].strip
+end
+def get_default_gateway
+    `route | grep 'default' | awk '{print $2}'`.strip
+end
+
+ETH0_MAC=get_if_mac("eth0")
+
+def post_to_controller(path, params={})
+    uri = URI.parse("#{$controller_url}/#{path}")
+    http = Net::HTTP.new(uri.hostname,uri.port)
+    http.use_ssl = true if uri.instance_of? URI::HTTPS
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    req = Net::HTTP::Post.new(uri)
+    req.body = params.merge({"mac":ETH0_MAC}).to_json
+    req.content_type = 'application/json'
+    http.request(req)
+end
 
 class SysExecError < StandardError
     attr_reader :return_code
@@ -102,13 +127,13 @@ def flash_os_image
         set_exit true
         
         
-        `wget #{IMG_SERVER}/#{IMGFILE}.md5.txt -P /tmp` unless File.file?("/tmp/#{IMGFILE}.md5.txt")
+        `wget #{$controller_url}/#{IMGFILE}.md5.txt -P /tmp` unless File.file?("/tmp/#{IMGFILE}.md5.txt")
         new_md5 = `cat /tmp/#{IMGFILE}.md5.txt`.split[0]
         if new_md5 == $local_data["current_image_md5"] && $local_data["last_flash_success"]
             puts "Identical image already flashed successfully, skipping flash."
             return true
         end
-        `wget #{IMG_SERVER}/#{IMGFILE} -P /tmp` unless File.file?("/tmp/#{IMGFILE}")
+        `wget #{$controller_url}/#{IMGFILE} -P /tmp` unless File.file?("/tmp/#{IMGFILE}")
         `cd /tmp; md5sum -c #{IMGFILE}.md5.txt;`
         puts "New image has MD5 has of #{new_md5}"
         $local_data["current_image_md5"] = new_md5
@@ -231,7 +256,7 @@ end
 
 def do_boot
     puts "Deciding whether to boot"
-    no_boot = `curl -sf #{NO_BOOT_PATH}`
+    no_boot = `curl -sf #{$no_boot_path}`
     result=$?.success?
     puts "Checking for noboot file..."
     unless result and no_boot.strip.downcase =~ /true|1|yes/
@@ -272,16 +297,25 @@ while !system('ifconfig eth0 | grep "inet addr:" > /dev/null 2>&1')
     end
 end
 
+$default_gateway = get_default_gateway
+$controller_url = "https://#{$default_gateway}/fw_update"
+$no_boot_path = "#{$controller_url}/no_boot.json"
 
-should_flash = `curl #{IMG_SERVER}/doflash`.strip.downcase =~ /true|1|yes/
-should_flash = false unless $?.success?
 
-# Decide whether to pull and flash or just go straight to boot.
-if should_flash
-    $local_data["last_flash_success"] = flash_os_image     
-end
-save_local_data
-do_boot
+res = post_to_controller('no_boot')
+PP.pp(res)
+PP.pp(res.body)
+
+
+# # Decide whether to pull and flash or just go straight to boot.
+# should_flash = `curl #{$controller_url}/doflash`.strip.downcase =~ /true|1|yes/
+# should_flash = false unless $?.success?
+# if should_flash
+#     $local_data["last_flash_success"] = flash_os_image     
+# end
+
+# save_local_data
+# do_boot
 
 
 

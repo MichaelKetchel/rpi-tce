@@ -224,6 +224,7 @@ pciutils.tcz
 raspi-utils.tcz
 util-linux.tcz
 curl.tcz
+openssl-1.1.1.tcz
 rebootp.tcz''' | sudo tee -a $DATA_PATH/tce/onboot.lst
 
 
