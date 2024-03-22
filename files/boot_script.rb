@@ -4,6 +4,7 @@ require 'net/http'
 require 'net/https'
 require 'pp'
 require 'openssl'
+require 'open-uri'
 # Maybe could use /usr/bin/env ruby, but the above is the known path on TCE.
 
 def bigputs (args)
@@ -14,7 +15,7 @@ end
 BOOT_THRASH_THRESHOLD = 4
 BOOT_EXEC_MAX_ENTRIES = 10
 MAX_BOOT_ADDRESS_WAIT = 60
-RPI_MODEL = `cat /sys/firmware/devicetree/base/model | sed 's/\x0//g'`
+RPI_MODEL = `cat /sys/firmware/devicetree/base/model`.delete("\u0000")
 
 STARTING_DIR = File.expand_path(File.dirname(__FILE__))
 IMGFILE="piglet-0135_20240315-080026_cb70731d.img.gz"
@@ -50,8 +51,17 @@ def post_to_controller(path, params={})
     http.use_ssl = true if uri.instance_of? URI::HTTPS
     http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     req = Net::HTTP::Post.new(uri)
-    req.body = params.merge({"mac":ETH0_MAC}).to_json
+    req.body = params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}).to_json
     req.content_type = 'application/json'
+    http.request(req)
+end
+
+def get_from_url(path)
+    uri = URI.parse(path)
+    http = Net::HTTP.new(uri.hostname,uri.port)
+    http.use_ssl = true if uri.instance_of? URI::HTTPS
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    req = Net::HTTP::Get.new(uri)
     http.request(req)
 end
 
@@ -303,8 +313,27 @@ $no_boot_path = "#{$controller_url}/no_boot.json"
 
 
 res = post_to_controller('no_boot')
+
 PP.pp(res)
 PP.pp(res.body)
+
+# https://stackoverflow.com/questions/23410571/ruby-on-rails-how-to-save-remote-file-over-https-and-basic-authentication
+response = post_to_controller('get_firmware_file')
+case response
+when Net::HTTPSuccess     then response
+when Net::HTTPRedirection then
+
+    File.open('/tmp/image.img.gz', 'wb') do |file|
+        file.binmode
+        open(response['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) do |read_file|
+            file.write(read_file.read)
+        end
+        puts file.path
+    end
+else
+  response.error!
+end
+
 
 
 # # Decide whether to pull and flash or just go straight to boot.
