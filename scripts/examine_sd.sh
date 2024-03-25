@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # set -e 
 
-source ./common.sh
+SCRIPT=$(realpath $0)
+SCRIPT_PATH=$(dirname $SCRIPT)
+source $SCRIPT_PATH/common.sh
+cd $PROJECT_PATH
 
 MNT_PATH="$WORK_PATH/mnt/"
 BOOT_PATH="$MNT_PATH/boot"

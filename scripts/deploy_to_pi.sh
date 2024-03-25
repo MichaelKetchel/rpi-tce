@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # set -e 
-source common.sh
+SCRIPT=$(realpath $0)
+SCRIPT_PATH=$(dirname $SCRIPT)
+source $SCRIPT_PATH/common.sh
+cd $PROJECT_PATH
 
 echo "Switching SD-MUX $SD_MUX_SERIAL back to TS"
 sudo sd-mux-ctrl --device-serial=$SD_MUX_SERIAL --ts

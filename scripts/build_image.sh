@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 set -e 
-source ./common.sh
+SCRIPT=$(realpath $0)
+SCRIPT_PATH=$(dirname $SCRIPT)
+source $SCRIPT_PATH/common.sh
+cd $PROJECT_PATH
 
 MNT_PATH="$WORK_PATH/mnt/"
 BOOT_PATH="$MNT_PATH/boot"
 DATA_PATH="$MNT_PATH/data"
 
-KERNEL_ARTIFACTS_PATH="$SCRIPT_PATH/kernel/artifacts"
-KEXEC_ARTIFACTS_PATH="$SCRIPT_PATH/kexec/artifacts"
-REBOOTP_ARTIFACTS_PATH="$SCRIPT_PATH/rebootp/artifacts"
-ARTIFACTS_PATH="$SCRIPT_PATH/artifacts"
+KERNEL_ARTIFACTS_PATH="$PROJECT_PATH/kernel/artifacts"
+KEXEC_ARTIFACTS_PATH="$PROJECT_PATH/kexec/artifacts"
+REBOOTP_ARTIFACTS_PATH="$PROJECT_PATH/rebootp/artifacts"
+ARTIFACTS_PATH="$PROJECT_PATH/artifacts"
 BASE_IMAGE="piCore64-14.1.0"
 CORE_NAME="rootfs-piCore64-14.1.gz"
 
@@ -23,14 +26,14 @@ for path in $WORK_PATH $MNT_PATH $BOOT_PATH $DATA_PATH; do
 done
 
 # Build kernel
-# $SCRIPT_PATH/kernel/get_sources.sh
-# $SCRIPT_PATH/kernel/build_kernel.sh
+# $PROJECT_PATH/kernel/get_sources.sh
+# $PROJECT_PATH/kernel/build_kernel.sh
 
 # Build kexec tcz
-# $SCRIPT_PATH/kexec/get_sources.sh
-# $SCRIPT_PATH/kexec/run_remote_build.sh
+# $PROJECT_PATH/kexec/get_sources.sh
+# $PROJECT_PATH/kexec/run_remote_build.sh
 
-# $SCRIPT_PATH/get_sources.sh
+# $PROJECT_PATH/get_sources.sh
 
 cd $SOURCES_PATH
 wget -nc http://tinycorelinux.net/14.x/aarch64/releases/RPi/$BASE_IMAGE.zip
@@ -199,7 +202,7 @@ sudo fstrim -v $DATA_PATH
 # Copy in new config and other stuff
 print_title "Copying in config..."
 MODULES_ARCHIVE=$(basename $(ls $KERNEL_ARTIFACTS_PATH/modules*.gz))
-sudo install -o root -g root -m 755 $SCRIPT_PATH/files/config.txt $BOOT_PATH/config.txt
+sudo install -o root -g root -m 755 $PROJECT_PATH/files/config.txt $BOOT_PATH/config.txt
 sudo sed -i "s/MODULES_ARCHIVE/${MODULES_ARCHIVE}/" $BOOT_PATH/config.txt
 sudo sed -i "s/KERNEL_IMG/kernel8.img/" $BOOT_PATH/config.txt
 
@@ -208,12 +211,12 @@ sudo sed -i "s/KERNEL_IMG/kernel8.img/" $BOOT_PATH/config.txt
 print_title "Copying in kernel, modules, and device tree files..."
 # sudo install -d -o root -g root -m 755 $BOOT_PATH/overlays
 sudo cp -ar $KERNEL_ARTIFACTS_PATH/boot/* $BOOT_PATH/
-sudo install -o root -g root -m 755 $SCRIPT_PATH/files/cmdline.txt $BOOT_PATH/cmdline.txt
+sudo install -o root -g root -m 755 $PROJECT_PATH/files/cmdline.txt $BOOT_PATH/cmdline.txt
 sudo install -o root -g root -m 755 $KERNEL_ARTIFACTS_PATH/modules*.gz $BOOT_PATH/
 
 # Install TCE packages
 print_title "Installing TCE packages..."
-sudo cp -p $SCRIPT_PATH/files/tce/optional/* $DATA_PATH/tce/optional/
+sudo cp -p $PROJECT_PATH/files/tce/optional/* $DATA_PATH/tce/optional/
 sudo install -o 1001 -g 50 -m 664 $KEXEC_ARTIFACTS_PATH/kexec_package.tcz $DATA_PATH/tce/optional/kexec.tcz
 sudo install -o 1001 -g 50 -m 664 $REBOOTP_ARTIFACTS_PATH/rebootp.tcz $DATA_PATH/tce/optional/rebootp.tcz
 
@@ -247,7 +250,7 @@ zcat ${BOOT_PATH}/${CORE_NAME} | sudo cpio -i -H newc -d
 echo "Updating core"
 sudo sed -i 's|# /usr/sbin/startserial|/usr/sbin/startserial|g' opt/bootlocal.sh
 sudo echo 'if [ -x /home/tc/bootscript ]; then /home/tc/bootscript; else /opt/bootscript; fi' | sudo tee -a opt/bootlocal.sh
-sudo install -o 0 -g 50 -m 775 $SCRIPT_PATH/files/boot_script.rb opt/bootscript
+sudo install -o 0 -g 50 -m 775 $PROJECT_PATH/files/boot_script.rb opt/bootscript
 
 # read -n 1 -p "Ready to repack core. Continue?"
 
