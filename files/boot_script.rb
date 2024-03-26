@@ -7,18 +7,14 @@ require 'openssl'
 require 'open-uri'
 # Maybe could use /usr/bin/env ruby, but the above is the known path on TCE.
 
-def bigputs (args)
-    puts "#### #{args} ####"
-end
-
 # fdisk -x /dev/mmcblk0
+NO_VERIFY_SSL = true
 BOOT_THRASH_THRESHOLD = 4
 BOOT_EXEC_MAX_ENTRIES = 10
 MAX_BOOT_ADDRESS_WAIT = 60
 RPI_MODEL = `cat /sys/firmware/devicetree/base/model`.delete("\u0000")
-
 STARTING_DIR = File.expand_path(File.dirname(__FILE__))
-IMGFILE="piglet-0135_20240315-080026_cb70731d.img.gz"
+IMGFILE="image.img.gz"
 IMG_PATH="/tmp/#{IMGFILE}"
 BOOT_DEVICE="/dev/mmcblk0"
 BOOT_DATA_PART="#{BOOT_DEVICE}p2"
@@ -27,42 +23,104 @@ LOCAL_DATA_FILE="/mnt/mmcblk0p2/tce/bldata.json"
 
 $controller_url = nil
 $default_gateway = nil
-$no_boot_path = nil
 
 $local_data = {
     "current_image_md5" => nil,
     "last_flash_success" => false,
     "boot_exec_times" => [],
     "first_boot" => true,
+    "remote_log" => false,
 }
+
+alias :og_puts :puts
+
+def puts(*args, &block)
+    og_puts(*args, &block)
+    msg = args.join(' ')
+    log_msg msg if $local_data['remote_log']
+    return msg
+end
+
+def bigputs (args)
+    return puts "#### #{args} ####"
+end
 
 def get_if_mac(ifname)
     `ifconfig #{ifname}`.match(/(?<=HWaddr )((?:\w\w:){5}\w\w)/)[1].strip
 end
+
 def get_default_gateway
     `route | grep 'default' | awk '{print $2}'`.strip
 end
 
 ETH0_MAC=get_if_mac("eth0")
 
-def post_to_controller(path, params={})
+def post_to_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
+    
     uri = URI.parse("#{$controller_url}/#{path}")
+    # puts("POSTting URI: #{uri.to_s}")
     http = Net::HTTP.new(uri.hostname,uri.port)
     http.use_ssl = true if uri.instance_of? URI::HTTPS
-    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE if NO_VERIFY_SSL
     req = Net::HTTP::Post.new(uri)
     req.body = params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}).to_json
     req.content_type = 'application/json'
-    http.request(req)
+    req["Accept"] = 'application/json'
+    resp = http.request(req)
+
+    if follow_redirects == 0 || !resp.kind_of?(Net::HTTPRedirection)
+        return yield(resp, false) if block_given?
+        return resp
+    end
+    
+    if (resp["location"].include?("disposition=attachment") && allow_file)
+        return open(resp['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) {|io| yield(io, true)} if NO_VERIFY_SSL
+        return open(resp['location'], "rb") {|io| yield(io, true)}
+    end
+
+    return post_to_controller(resp['location'], params:params, follow_redirects:follow_redirects-1, &block)
 end
 
-def get_from_url(path)
+def get_from_url(path, follow_redirects:0, allow_file:false, &block)
     uri = URI.parse(path)
+    # puts("GETting URI: #{uri.to_s}")
     http = Net::HTTP.new(uri.hostname,uri.port)
     http.use_ssl = true if uri.instance_of? URI::HTTPS
     http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     req = Net::HTTP::Get.new(uri)
-    http.request(req)
+    resp = http.request(req)
+
+    if follow_redirects == 0 || !resp.kind_of?(Net::HTTPRedirection)
+        return yield(resp, false) if block_given?
+        return resp
+    end
+
+    if (resp["location"].include?("disposition=attachment") && allow_file)
+        return open(resp['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) {|io| yield(io, true)} if NO_VERIFY_SSL
+        return open(resp['location'], "rb") {|io| yield(io, true)}
+    end
+    return get_from_url(resp['location'], follow_redirects:follow_redirects-1)
+end
+
+def log_msg(msg)
+    post_to_controller("log_message", params:{'msg' => msg})
+end
+
+def send_status(status)
+    msg = "#{status} (#{caller_locations[0]})"
+    # puts "Informing controller of status: #{msg}"
+    post_to_controller("flash_status", params:{'status' => msg})
+end
+
+def ask_controller(endpoint, fail_value=nil )
+    puts "Asking controller about #{endpoint}..."
+    res = post_to_controller(endpoint)
+    if res.code == '200'
+        puts "Controller said #{res.body.strip}"
+        return res.body.strip.downcase =~ /true|1|yes/
+    end
+    puts "Non-200 returned: #{res.code} #{res.to_s}"
+    return fail_value
 end
 
 class SysExecError < StandardError
@@ -71,13 +129,27 @@ class SysExecError < StandardError
     attr_reader :res
     attr_reader :caller
     def initialize(msg="An error occured running a shell command", cmd='', res='', return_code=-1, caller=nil)
-      @return_code = return_code
-      @cmd = cmd
-      @res = res
-      @caller = caller
-      super(msg)
+        @return_code = return_code
+        @cmd = cmd
+        @res = res
+        @caller = caller
+        super(msg)
     end
-  end
+end
+
+class CommunicationError < StandardError
+    attr_reader :return_code
+    attr_reader :path
+    attr_reader :res
+    attr_reader :caller
+    def initialize(msg="An error occured communicating with the controller: #{res}", path='', res='', return_code=-1, caller=nil)
+        @return_code = return_code
+        @path = path
+        @res = res
+        @caller = caller
+        super(msg)
+    end
+end
 
 def set_exit enable
     if enable
@@ -101,12 +173,6 @@ def set_exit enable
       define_method :`, Kernel.instance_method(:`)
     end
   end
-  
-#   set_exit true
-#   # ...
-#   # any failed system calls here will cause your script to exit
-#   # ...
-#   set_exit false
 
 def save_local_data
     mounted = `mount` =~ /#{BOOT_DATA_PART.gsub('/','\/')} on/
@@ -133,24 +199,48 @@ end
 def flash_os_image
     begin
         puts "Script starting in: #{STARTING_DIR}"
-        puts "Fetching flash image"
+        send_status puts("Starting Flashing process")
         set_exit true
+
+        send_status puts("Getting Firmware MD5 Digest")
+        resp = post_to_controller('get_firmware_md5')
+        raise CommunicationError.new("Unable to fetch firmware md5", path: "get_firmware_md5", res:resp, return_code:resp.code) unless resp.kind_of? Net::HTTPSuccess
+        new_md5 = JSON.parse(resp.body)['md5']
         
-        
-        `wget #{$controller_url}/#{IMGFILE}.md5.txt -P /tmp` unless File.file?("/tmp/#{IMGFILE}.md5.txt")
-        new_md5 = `cat /tmp/#{IMGFILE}.md5.txt`.split[0]
-        if new_md5 == $local_data["current_image_md5"] && $local_data["last_flash_success"]
-            puts "Identical image already flashed successfully, skipping flash."
+        send_status puts("Checking if should flash this firmware")
+        if new_md5 == $local_data["current_image_md5"] && $local_data["last_flash_success"] && !ask_controller("force_flash", false)
+            puts "Identical image already flashed successfully, no force requested, skipping flash."
             return true
         end
-        `wget #{$controller_url}/#{IMGFILE} -P /tmp` unless File.file?("/tmp/#{IMGFILE}")
-        `cd /tmp; md5sum -c #{IMGFILE}.md5.txt;`
+
+        send_status puts("Getting Firmware File")
+        post_to_controller('get_firmware_file', follow_redirects:10, allow_file:true) do |read_file, file_found|
+            unless file_found
+                puts "No file found: #{read_file.error}" 
+                raise CommunicationError.new("Unable to fetch firmware file", path: "get_firmware_file", res:read_file, return_code:read_file.code)
+            end
+            # puts read_file.class < IO
+            File.open(IMG_PATH, 'wb') do |file|
+                file.binmode
+                file.write(read_file.read)
+                puts file.path
+            end
+        end
+
+        send_status puts("Checking MD5 of downloaded firmware file")
+        file_md5 = `md5sum #{IMG_PATH}`.split(" ")[0]
+        if new_md5 == file_md5
+            send_status puts("MD5 OK, firmware downloaded OK.")
+        else
+            raise Exception.new("MD5 sums from server and downloaded file did not match") 
+        end
+        
         puts "New image has MD5 has of #{new_md5}"
         $local_data["current_image_md5"] = new_md5
         `cd #{STARTING_DIR};`
 
         # Get first chunks for img beginning
-        puts "Reading image partition table"
+        send_status puts "Reading image partition table"
         `gzip -dc #{IMG_PATH} | dd bs=8M count=1 iflag=fullblock > #{IMG_BEGINNING_PATH}`
 
         local_part_details = `fdisk -l #{BOOT_DEVICE} -o device,start,end,id,boot | grep #{BOOT_DEVICE}`
@@ -170,7 +260,7 @@ def flash_os_image
         img_skip_sectors = img_part_details.first[1].to_i
         puts ("Image skip sectors: #{img_skip_sectors}")
 
-
+        send_status puts "Writing image to disk"
         # Well.. it might be just that easy. Write the flashed image to disk.
         dd_cmd = "gzip -dc #{IMG_PATH} | dd of=#{BOOT_DEVICE} bs=8M iflag=skip_bytes,fullblock oflag=seek_bytes skip=#{img_skip_sectors*512} seek=#{seek_sectors*512}"
         puts "Will run: sudo #{dd_cmd}"
@@ -179,7 +269,8 @@ def flash_os_image
 
 
         # Update partition table
-        bigputs("Updating partition table")
+        send_status bigputs("Updating partition table")
+        
         puts("Removing extra partitions if present")
         `sudo umount #{BOOT_DEVICE}p3 || true`
         `sudo umount #{BOOT_DEVICE}p4 || true`
@@ -210,14 +301,14 @@ def flash_os_image
         `sudo fdisk -l`
         sleep 10
 
-        bigputs("Extending partitions and FS")
-
-        puts "Resizing and checking partitions"
+        send_status bigputs("Extending partitions and FS")
+        
+        send_status puts "Resizing and checking partitions"
         `sudo parted /dev/mmcblk0 "resizepart 4 -0"`
         `sudo e2fsck -fp /dev/mmcblk0p4`
         `sudo resize2fs /dev/mmcblk0p4`
 
-        puts "Mounting filesystems"
+        send_status puts "Mounting filesystems"
         `sudo mkdir -p /mnt/mmcblk0p3`
         `sudo mkdir -p /mnt/mmcblk0p4`
         `sudo mount /dev/mmcblk0p1 /mnt/mmcblk0p1` unless `mount` =~ /\/dev\/mmcblk0p1 on/
@@ -230,12 +321,9 @@ def flash_os_image
         # sudo kexec -e 
 
         img_blkid_partuuid = `blkid #{IMG_BEGINNING_PATH}`[/PTUUID="(\w+)"/,1]
-        #92c1f194
         boot_blkid_partuuid = `blkid #{BOOT_DEVICE}`[/PTUUID="(\w+)"/,1]
-        #30b3401a
 
-
-        puts "Updating cmdline.txt"
+        send_status puts "Updating cmdline.txt"
         puts "IMG partuuid: #{img_blkid_partuuid}"
         puts "Boot partuuid: #{boot_blkid_partuuid}"
         # Update cmdline
@@ -245,7 +333,7 @@ def flash_os_image
         `sudo sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /mnt/mmcblk0p3/cmdline.txt`
         `sudo sed -i 's| sdhci\.debug_quirks2=4||' /mnt/mmcblk0p3/cmdline.txt`
 
-        puts "Updating fstab"
+        send_status puts "Updating fstab"
         # Update fstab
         (0..7).each do |part_num|
             `sudo sed -i 's/PARTUUID=#{img_blkid_partuuid}-0#{part_num}/PARTUUID=#{boot_blkid_partuuid}-0#{part_num + 2}/g' /mnt/mmcblk0p4/etc/fstab`
@@ -253,30 +341,50 @@ def flash_os_image
         set_exit false
         return true
 
+
+    rescue CommunicationError => exception
+        send_status puts "An exception occurred communicating with the controller: #{exception.path} (#{exception.return_code}): #{exception.res.body}"
+        puts "Exception: #{exception.inspect}\n\t#{exception.backtrace.join("\n\t")}"
+        return false
     rescue SysExecError => exception
-        puts "An exception occurred running a shell command: #{exception.cmd} (#{exception.return_code}): #{exception.res}"
+        send_status puts "An exception occurred running a shell command: #{exception.cmd} (#{exception.return_code}): #{exception.res}"
         puts "Exception: #{exception.inspect}\n\t#{exception.backtrace.join("\n\t")}"
         return false
     rescue Exception => exception
-        puts "An unknown error occurred while flashing: #{exception} #{exception.message}"
+        send_status puts "An unknown error occurred while flashing: #{exception} #{exception.message}"
         puts "Exception: #{exception.inspect}\n\t#{exception.backtrace.join("\n\t")}"
         return false
     end
 end
 
+def wait_for_ethernet
+    # Sense ethernet and wait for address
+    current_wait=0
+    while !system('ifconfig eth0 | grep "inet addr:" > /dev/null 2>&1')
+        puts "Waiting for address..."
+        sleep 5
+        if current_wait > MAX_BOOT_ADDRESS_WAIT && $local_data["last_flash_success"]
+            puts "Maximum wait exceeded, booting old image."
+            sleep 5
+            do_boot
+        end
+    end
+end
+
 def do_boot
     puts "Deciding whether to boot"
-    no_boot = `curl -sf #{$no_boot_path}`
-    result=$?.success?
-    puts "Checking for noboot file..."
-    unless result and no_boot.strip.downcase =~ /true|1|yes/
+    no_boot = ask_controller('no_boot', false)
+    unless no_boot
         puts "Checking if last flash succeeded"
         unless $local_data["last_flash_success"]
-            puts "Last flash failed. Restarting to try again."
-            sleep 5
-            `sudo rebootp 1`
+            send_status puts("Last flash failed. Restarting to try again.")
+            # save_local_data
+            # sleep 5
+            # `sudo rebootp 1`
+            return
         end
-        puts "Booting..."
+        send_status puts("Booting...")
+        save_local_data
         sleep 5
         `sudo rebootp 3`
     end
@@ -287,6 +395,9 @@ end
 load_local_data
 $local_data["boot_exec_times"].append(Time.now)
 $local_data["boot_exec_times"] = $local_data["boot_exec_times"].last(BOOT_EXEC_MAX_ENTRIES)
+
+# TODO: Check for thrashing 
+
 # Handle first boot tasks like saving ssh keys
 if $local_data["first_boot"]
     $local_data["first_boot"] = false
@@ -294,76 +405,27 @@ if $local_data["first_boot"]
     `filetool.sh -b`
 end
 
-# Sense ethernet and wait for address
-
-current_wait=0
-while !system('ifconfig eth0 | grep "inet addr:" > /dev/null 2>&1')
-    puts "Waiting for address..."
-    sleep 5
-    if current_wait > MAX_BOOT_ADDRESS_WAIT && $local_data["last_flash_success"]
-        puts "Maximum wait exceeded, booting old image."
-        sleep 5
-        do_boot
-    end
-end
-
+wait_for_ethernet
 $default_gateway = get_default_gateway
 $controller_url = "https://#{$default_gateway}/fw_update"
-$no_boot_path = "#{$controller_url}/no_boot.json"
+send_status puts("RG Loader Online")
 
-
-res = post_to_controller('no_boot')
-
-PP.pp(res)
-PP.pp(res.body)
-
-# https://stackoverflow.com/questions/23410571/ruby-on-rails-how-to-save-remote-file-over-https-and-basic-authentication
-response = post_to_controller('get_firmware_file')
-case response
-when Net::HTTPSuccess     then response
-when Net::HTTPRedirection then
-
-    File.open('/tmp/image.img.gz', 'wb') do |file|
-        file.binmode
-        open(response['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) do |read_file|
-            file.write(read_file.read)
-        end
-        puts file.path
+save_local_data
+while true
+    # Decide whether to pull and flash or just go straight to boot.
+    should_flash = ask_controller('do_flash', false)
+    if should_flash
+        puts "Instructed to flash"
+        send_status puts("Preparing to flash")
+        flash_result = flash_os_image
+        send_status puts("Flash #{ flash_result ? 'succeeded' : 'failed'}")
+        $local_data["last_flash_success"] = flash_result 
+        save_local_data
     end
-else
-  response.error!
+    do_boot
+    sleep 10
+    # If we get here, do_boot has decided not to boot and we need to cycle again.
+    wait_for_ethernet
+    $default_gateway = get_default_gateway
+    $controller_url = "https://#{$default_gateway}/fw_update"
 end
-
-
-
-# # Decide whether to pull and flash or just go straight to boot.
-# should_flash = `curl #{$controller_url}/doflash`.strip.downcase =~ /true|1|yes/
-# should_flash = false unless $?.success?
-# if should_flash
-#     $local_data["last_flash_success"] = flash_os_image     
-# end
-
-# save_local_data
-# do_boot
-
-
-
-# # get new partuuids with blkid
-# sudo sed -i 's/4e639091-02/30b3401a-03/g' /mnt/mmcblk0p3/cmdline.txt
-# sudo sed -i 's/ quiet/ /g' /mnt/mmcblk0p3/cmdline.txt
-# sudo sed -i 's/4e639091-01/30b3401a-02/g' /mnt/mmcblk0p4/etc/fstab
-# sudo sed -i 's/4e639091-02/30b3401a-03/g' /mnt/mmcblk0p4/etc/fstab
-
-
-#[1..2].split(" ")
-# puts local_part_details[0]
-
-
-
-# img_part_details = `fdisk -l #{IMGFILE} -o device,start,end`
-# img_part_details = img_part_details.split("\n")[1..2].map{|line| line.split(" ")}
-# puts img_part_details
-# # local_part_details
-
-# TODO: Make this smarter about which partition it is booting from.
-# `sudo rebootp 3`
