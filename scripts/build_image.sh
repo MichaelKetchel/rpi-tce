@@ -248,10 +248,16 @@ zcat ${BOOT_PATH}/${CORE_NAME} | sudo cpio -i -H newc -d
 # read -n 1 -p "Ready to update core. Continue?"
 
 echo "Updating core"
+echo "Configuring boot scripts"
 sudo sed -i 's|# /usr/sbin/startserial|/usr/sbin/startserial|g' opt/bootlocal.sh
 sudo echo 'if [ -x /home/tc/bootscript ]; then /home/tc/bootscript; else /opt/bootscript; fi' | sudo tee -a opt/bootlocal.sh
 sudo install -o 0 -g 50 -m 775 $PROJECT_PATH/files/boot_script.rb opt/bootscript
 
+echo "Configuring DHCP and DHCP hooks"
+sudo install -o 0 -g 50 -m 775 $PROJECT_PATH/files/dhcp_hook.sh opt/dhcp_hook.sh
+sudo sed -i '$ d' usr/share/udhcpc/default.script
+sudo echo 'if test -f /opt/dhcp_hook.sh; then . /opt/dhcp_hook.sh; fi' >> usr/share/udhcpc/default.script
+sudo sed -i -E 's|(/sbin/udhcpc)|\1 -V "RG Nets" -O 43|' etc/init.d/dhcp.sh
 # read -n 1 -p "Ready to repack core. Continue?"
 
 echo "Repacking core"

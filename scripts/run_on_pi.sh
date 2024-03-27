@@ -14,9 +14,32 @@ print_usage() {
 echo "Usage:
     boot <ssh_address>: Runs ./files/boot_script.sh on host
     dhcp <ssh_address>: Runs udhcp with ./files/dhcp_hook.sh on host
+    setup <ssh_address>: Tries to automatically setup host for ssh access
+    ssh <ssh_address>: Connects to host via ssh. Accepts additional SSH arguments
+    connect: Alias of ssh
 
     Example: run_on_pi.sh tc@192.170.1.55 dhcp
 "
+}
+
+setup () {
+    ssh-keygen -R $(sed 's|[^@]*@||' <<< $SSH_ADDRESS)
+    IFS='@' read -ra address_parts <<< "$SSH_ADDRESS"
+
+    if ! command -v sshpass &> /dev/null; then
+        ssh-copy-id $SSH_ADDRESS
+    else
+        echo "User extracted from address: ${address_parts[0]}"
+        case ${address_parts[0]} in
+            tc) sshpass -p piCore ssh-copy-id $SSH_ADDRESS ;;
+            pi|*) sshpass -p raspberry ssh-copy-id $SSH_ADDRESS ;;
+        esac
+    fi
+}
+
+do_ssh () {
+    # shift;
+    ssh $SSH_ADDRESS "$@"
 }
 
 boot () {
@@ -42,6 +65,8 @@ if [[ $# -eq 0 ]] ; then
 fi
 shift
 case $1 in
+    setup) "$@"; exit;;
+    ssh|connect) shift; do_ssh "$@"; exit;;
     boot) "$@"; exit;;
     dhcp) "$@"; exit;;
     *) echo "Unrecognized arguments: $@"; print_usage; exit

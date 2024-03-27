@@ -5,6 +5,8 @@ require 'net/https'
 require 'pp'
 require 'openssl'
 require 'open-uri'
+require 'cgi'
+require 'yaml'
 # Maybe could use /usr/bin/env ruby, but the above is the known path on TCE.
 
 # fdisk -x /dev/mmcblk0
@@ -17,11 +19,10 @@ STARTING_DIR = File.expand_path(File.dirname(__FILE__))
 IMGFILE="image.img.gz"
 IMG_PATH="/tmp/#{IMGFILE}"
 BOOT_DEVICE="/dev/mmcblk0"
-BOOT_DATA_PART="#{BOOT_DEVICE}p2"
+BOOT_DATA_PART="#{BOOT_DEVICE}p1"
+LOCAL_DATA_FILE="/mnt/mmcblk0p1/bldata.json"
 IMG_BEGINNING_PATH="#{IMG_PATH}.begin"
-LOCAL_DATA_FILE="/mnt/mmcblk0p2/tce/bldata.json"
 
-$controller_url = nil
 $default_gateway = nil
 
 $local_data = {
@@ -30,6 +31,7 @@ $local_data = {
     "boot_exec_times" => [],
     "first_boot" => true,
     "remote_log" => false,
+    "boot_server_override" => nil,
 }
 
 alias :og_puts :puts
@@ -53,17 +55,26 @@ def get_default_gateway
     `route | grep 'default' | awk '{print $2}'`.strip
 end
 
+def get_server_from_dhcp_opts
+    dhcp_config = YAML.load_file('/tmp/dhcp_config.yml')
+    address = dhcp_config.dig('eth0', 'opts', 43)
+    address == nil ? nil : address.scan(/../).map(&:hex).drop(2).pack('C*')
+end
+
+def get_controller_url
+    "https://#{ $local_data["boot_server_override"] || get_server_from_dhcp_opts || $default_gateway }/api/firmware_update"
+end
+
 ETH0_MAC=get_if_mac("eth0")
 
-def post_to_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
-    
-    uri = URI.parse("#{$controller_url}/#{path}")
+def post_to_url(path, params:{}, follow_redirects:0, allow_file:false, &block)
+    uri = URI.parse(path)
     # puts("POSTting URI: #{uri.to_s}")
     http = Net::HTTP.new(uri.hostname,uri.port)
     http.use_ssl = true if uri.instance_of? URI::HTTPS
     http.verify_mode = OpenSSL::SSL::VERIFY_NONE if NO_VERIFY_SSL
     req = Net::HTTP::Post.new(uri)
-    req.body = params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}).to_json
+    req.body = params.to_json
     req.content_type = 'application/json'
     req["Accept"] = 'application/json'
     resp = http.request(req)
@@ -78,13 +89,14 @@ def post_to_controller(path, params:{}, follow_redirects:0, allow_file:false, &b
         return open(resp['location'], "rb") {|io| yield(io, true)}
     end
 
-    return post_to_controller(resp['location'], params:params, follow_redirects:follow_redirects-1, &block)
+    return post_to_url(resp['location'], params:params, follow_redirects:follow_redirects-1, &block)
 end
 
-def get_from_url(path, follow_redirects:0, allow_file:false, &block)
+def get_from_url(path, params:nil, follow_redirects:0, allow_file:false, &block)
     uri = URI.parse(path)
+    uri.query = params.collect { |k,v| "#{k}=#{CGI::escape(v.to_s)}" }.join('&') if not params.nil?
     # puts("GETting URI: #{uri.to_s}")
-    http = Net::HTTP.new(uri.hostname,uri.port)
+    http = Net::HTTP.new(uri.hostname, uri.port)
     http.use_ssl = true if uri.instance_of? URI::HTTPS
     http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     req = Net::HTTP::Get.new(uri)
@@ -99,8 +111,18 @@ def get_from_url(path, follow_redirects:0, allow_file:false, &block)
         return open(resp['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) {|io| yield(io, true)} if NO_VERIFY_SSL
         return open(resp['location'], "rb") {|io| yield(io, true)}
     end
-    return get_from_url(resp['location'], follow_redirects:follow_redirects-1)
+    return get_from_url(resp['location'], params, follow_redirects:follow_redirects-1, &block)
 end
+
+def post_to_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
+    return post_to_url("#{get_controller_url()}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, &block)
+end
+
+def get_from_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
+    return get_from_url("#{get_controller_url()}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, &block)
+end
+
+
 
 def log_msg(msg)
     post_to_controller("log_message", params:{'msg' => msg})
@@ -114,7 +136,7 @@ end
 
 def ask_controller(endpoint, fail_value=nil )
     puts "Asking controller about #{endpoint}..."
-    res = post_to_controller(endpoint)
+    res = get_from_controller(endpoint)
     if res.code == '200'
         puts "Controller said #{res.body.strip}"
         return res.body.strip.downcase =~ /true|1|yes/
@@ -203,7 +225,7 @@ def flash_os_image
         set_exit true
 
         send_status puts("Getting Firmware MD5 Digest")
-        resp = post_to_controller('get_firmware_md5')
+        resp = get_from_controller('get_firmware_md5')
         raise CommunicationError.new("Unable to fetch firmware md5", path: "get_firmware_md5", res:resp, return_code:resp.code) unless resp.kind_of? Net::HTTPSuccess
         new_md5 = JSON.parse(resp.body)['md5']
         
@@ -214,7 +236,7 @@ def flash_os_image
         end
 
         send_status puts("Getting Firmware File")
-        post_to_controller('get_firmware_file', follow_redirects:10, allow_file:true) do |read_file, file_found|
+        get_from_controller('get_firmware_file', follow_redirects:10, allow_file:true) do |read_file, file_found|
             unless file_found
                 puts "No file found: #{read_file.error}" 
                 raise CommunicationError.new("Unable to fetch firmware file", path: "get_firmware_file", res:read_file, return_code:read_file.code)
@@ -396,6 +418,7 @@ load_local_data
 $local_data["boot_exec_times"].append(Time.now)
 $local_data["boot_exec_times"] = $local_data["boot_exec_times"].last(BOOT_EXEC_MAX_ENTRIES)
 
+
 # TODO: Check for thrashing 
 
 # Handle first boot tasks like saving ssh keys
@@ -406,26 +429,29 @@ if $local_data["first_boot"]
 end
 
 wait_for_ethernet
-$default_gateway = get_default_gateway
-$controller_url = "https://#{$default_gateway}/fw_update"
-send_status puts("RG Loader Online")
 
 save_local_data
 while true
-    # Decide whether to pull and flash or just go straight to boot.
-    should_flash = ask_controller('do_flash', false)
-    if should_flash
-        puts "Instructed to flash"
-        send_status puts("Preparing to flash")
-        flash_result = flash_os_image
-        send_status puts("Flash #{ flash_result ? 'succeeded' : 'failed'}")
-        $local_data["last_flash_success"] = flash_result 
-        save_local_data
+    begin
+        send_status puts("RG Loader Online")
+        puts "Controller URL: #{get_controller_url}"
+        # Decide whether to pull and flash or just go straight to boot.
+        should_flash = ask_controller('do_flash', false)
+        if should_flash
+            puts "Instructed to flash"
+            send_status puts("Preparing to flash")
+            flash_result = flash_os_image
+            send_status puts("Flash #{ flash_result ? 'succeeded' : 'failed'}")
+            $local_data["last_flash_success"] = flash_result 
+            save_local_data
+        end
+        do_boot
+        sleep 10
+        # If we get here, do_boot has decided not to boot and we need to cycle again.
+        wait_for_ethernet
+    rescue => exception
+        puts "An exception #{exception} occurred while looping: #{exception.message}"
+        puts "Stubbornly refusing to die."
     end
-    do_boot
-    sleep 10
-    # If we get here, do_boot has decided not to boot and we need to cycle again.
-    wait_for_ethernet
-    $default_gateway = get_default_gateway
-    $controller_url = "https://#{$default_gateway}/fw_update"
 end
+
