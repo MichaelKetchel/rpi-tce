@@ -35,6 +35,11 @@ cm4_set_boot () {
     ssh $SSH_ADDRESS -t 'sh -lc "pinctrl set 4 op pn dh ; sleep 1; pinctrl set 22 op pn dl; sleep 1; pinctrl set 4 op pn dl"'
 }
 
+# Power cycle the CM4 board into boot mode
+cm4_set_off () {
+    ssh $SSH_ADDRESS -t 'sh -lc "pinctrl set 4 op pn dh ;"'
+}
+
 
 cm4_do_flash () {
     cm4_set_flash
@@ -62,4 +67,5 @@ case $1 in
     cm4_set_boot) "$@"; exit;;
     cm4_do_flash) "$@"; exit;;
     cm4_flash_only) "$@"; exit;;
+    cm4_set_off) "$@"; exit;;
 esac

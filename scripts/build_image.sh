@@ -284,6 +284,7 @@ sudo umount "$BOOT_PATH"
 sudo umount "$DATA_PATH"
 
 sudo kpartx -dv "${NEW_IMAGE_PATH}"
+gzip -k9 "${NEW_IMAGE_PATH}"
 
 # mv $BASE_IMAGE.img $NEW_IMAGE_NAME.img
 

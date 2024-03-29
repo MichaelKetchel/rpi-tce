@@ -31,10 +31,11 @@ setup () {
     else
         echo "User extracted from address: ${address_parts[0]}"
         case ${address_parts[0]} in
-            tc) sshpass -p piCore ssh-copy-id $SSH_ADDRESS ;;
+            tc) sshpass -p piCore ssh-copy-id $SSH_ADDRESS && ssh $SSH_ADDRESS -t 'sh -lc "filetool.sh -b"' ;;
             pi|*) sshpass -p raspberry ssh-copy-id $SSH_ADDRESS ;;
         esac
     fi
+    
 }
 
 do_ssh () {
@@ -45,7 +46,7 @@ do_ssh () {
 boot () {
     # scp ./rebootp/rebootp $SSH_ADDRESS:~/
     scp ./files/boot_script.rb $SSH_ADDRESS:~/bootscript
-    # ssh $SSH_ADDRESS -t 'sh -lc "filetool.sh -b"'
+    ssh $SSH_ADDRESS -t 'sh -lc "filetool.sh -b"'
     ssh $SSH_ADDRESS -t 'sh -lc "sudo ~/bootscript"'
 }
 

@@ -61,8 +61,23 @@ def get_server_from_dhcp_opts
     address == nil ? nil : address.scan(/../).map(&:hex).drop(2).pack('C*')
 end
 
+def get_cpu_info
+    serial = `awk '/Serial/{print $3}' /proc/cpuinfo`.chomp
+    model = `awk '/Model/{$1=$2=""; print $0}' /proc/cpuinfo`.chomp.lstrip
+    return {'serial' => serial, 'model' => model }
+end
+
+def get_os()
+    os = `uname -r`
+    return os.strip
+end
+
 def get_controller_url
     "https://#{ $local_data["boot_server_override"] || get_server_from_dhcp_opts || $default_gateway }/api/firmware_update"
+end
+
+def get_pifi_url
+    "https://#{ $local_data["boot_server_override"] || get_server_from_dhcp_opts || $default_gateway }/pifi"
 end
 
 ETH0_MAC=get_if_mac("eth0")
@@ -123,6 +138,21 @@ def get_from_controller(path, params:{}, follow_redirects:0, allow_file:false, &
 end
 
 
+def send_rxg_hello_mesg()
+    os=get_os()
+    cpu=get_cpu_info
+    body = { mac: ETH0_MAC,
+             version: "RG Loader",
+             ap_info: {
+               wlans: [],
+               os: os,
+               model: cpu['model'],
+               serial: cpu['serial'],
+             }
+    }
+    print "Hello: ", body.to_json,"\n"
+    result = post_to_url("#{get_pifi_url}/hello", params:body)
+  end
 
 def log_msg(msg)
     post_to_controller("log_message", params:{'msg' => msg})
@@ -429,6 +459,8 @@ if $local_data["first_boot"]
 end
 
 wait_for_ethernet
+send_rxg_hello_mesg
+sleep 1
 
 save_local_data
 while true
@@ -449,6 +481,7 @@ while true
         sleep 10
         # If we get here, do_boot has decided not to boot and we need to cycle again.
         wait_for_ethernet
+        send_rxg_hello_mesg
     rescue => exception
         puts "An exception #{exception} occurred while looping: #{exception.message}"
         puts "Stubbornly refusing to die."
