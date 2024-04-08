@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -e
+# set -x
 SCRIPT_NAME=$0
 SCRIPT=$(realpath $0)
 SCRIPT_PATH=$(dirname $SCRIPT)
@@ -30,9 +31,9 @@ setup () {
         ssh-copy-id $SSH_ADDRESS
     else
         echo "User extracted from address: ${address_parts[0]}"
-        case ${address_parts[0]} in
-            tc) sshpass -p piCore ssh-copy-id $SSH_ADDRESS && ssh $SSH_ADDRESS -t 'sh -lc "filetool.sh -b"' ;;
-            pi|*) sshpass -p raspberry ssh-copy-id $SSH_ADDRESS ;;
+        case "${address_parts[0]}" in
+            tc) echo 'Setting up as piCore'; sshpass -p piCore ssh-copy-id -o StrictHostKeyChecking=no  "$SSH_ADDRESS" && ssh $SSH_ADDRESS -t 'sh -lc "filetool.sh -b"' ;;
+            pi|*) echo 'Setting up as piglet'; sshpass -p raspberry ssh-copy-id -o StrictHostKeyChecking=no "$SSH_ADDRESS" ;;
         esac
     fi
     
@@ -40,7 +41,7 @@ setup () {
 
 do_ssh () {
     # shift;
-    ssh $SSH_ADDRESS "$@"
+    ssh -o StrictHostKeyChecking=no $SSH_ADDRESS "$@"
 }
 
 boot () {

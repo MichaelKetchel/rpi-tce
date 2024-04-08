@@ -250,7 +250,7 @@ zcat ${BOOT_PATH}/${CORE_NAME} | sudo cpio -i -H newc -d
 echo "Updating core"
 echo "Configuring boot scripts"
 sudo sed -i 's|# /usr/sbin/startserial|/usr/sbin/startserial|g' opt/bootlocal.sh
-sudo echo 'if [ -x /home/tc/bootscript ]; then /home/tc/bootscript; else /opt/bootscript; fi' | sudo tee -a opt/bootlocal.sh
+echo 'if [ -x /home/tc/bootscript ]; then echo "Found override bootscript, executing..."; /home/tc/bootscript; else echo "Using default bootscript."; /opt/bootscript; fi' | sudo tee -a opt/bootlocal.sh
 sudo install -o 0 -g 50 -m 775 $PROJECT_PATH/files/boot_script.rb opt/bootscript
 
 echo "Configuring DHCP and DHCP hooks"

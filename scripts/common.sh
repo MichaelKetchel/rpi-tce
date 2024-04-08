@@ -7,7 +7,7 @@ WORK_PATH="$PROJECT_PATH/work"
 SOURCES_PATH="$PROJECT_PATH/sources"
 NEW_IMAGE_NAME="rg-piCore64"
 SD_MUX_SERIAL='bdgrd_sdwirec_101'
-TARGET_DEVICE=/dev/sdc
+TARGET_DEVICE=/dev/sda
 
 
 print_title() {

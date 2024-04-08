@@ -7,13 +7,15 @@ require 'openssl'
 require 'open-uri'
 require 'cgi'
 require 'yaml'
+require 'resolv'
 # Maybe could use /usr/bin/env ruby, but the above is the known path on TCE.
 
 # fdisk -x /dev/mmcblk0
-NO_VERIFY_SSL = true
+NO_VERIFY_SSL = false
 BOOT_THRASH_THRESHOLD = 4
 BOOT_EXEC_MAX_ENTRIES = 10
-MAX_BOOT_ADDRESS_WAIT = 60
+MAX_BOOT_ADDRESS_WAIT = 120
+FIRMWARE_SERVER_DHCP_SUB_OPTION=155
 RPI_MODEL = `cat /sys/firmware/devicetree/base/model`.delete("\u0000")
 STARTING_DIR = File.expand_path(File.dirname(__FILE__))
 IMGFILE="image.img.gz"
@@ -22,8 +24,6 @@ BOOT_DEVICE="/dev/mmcblk0"
 BOOT_DATA_PART="#{BOOT_DEVICE}p1"
 LOCAL_DATA_FILE="/mnt/mmcblk0p1/bldata.json"
 IMG_BEGINNING_PATH="#{IMG_PATH}.begin"
-
-$default_gateway = nil
 
 $local_data = {
     "current_image_md5" => nil,
@@ -55,10 +55,26 @@ def get_default_gateway
     `route | grep 'default' | awk '{print $2}'`.strip
 end
 
+def digest_option_43_from_dec(option_hex, option_hash:{})
+    return option_hash if option_hex.size == 0
+    option_id = option_hex.shift
+    option_length = option_hex.shift
+    option_value = option_hex.shift(option_length)
+    option_hash[option_id] = option_value
+    return digest_option_43_from_dec(option_hex, option_hash:option_hash)
+end
+
+
 def get_server_from_dhcp_opts
     dhcp_config = YAML.load_file('/tmp/dhcp_config.yml')
-    address = dhcp_config.dig('eth0', 'opts', 43)
-    address == nil ? nil : address.scan(/../).map(&:hex).drop(2).pack('C*')
+    raw_option_payload = dhcp_config.dig('eth0', 'opts', 43)
+    if raw_option_payload != nil
+        option_hash = digest_option_43_from_dec(raw_option_payload.scan(/../).map(&:hex))
+        return option_hash[FIRMWARE_SERVER_DHCP_SUB_OPTION]&.pack('C*')
+    else
+        puts("Not controller defined in dhcp:")
+        return nil
+    end
 end
 
 def get_cpu_info
@@ -73,21 +89,24 @@ def get_os()
 end
 
 def get_controller_url
-    "https://#{ $local_data["boot_server_override"] || get_server_from_dhcp_opts || $default_gateway }/api/firmware_update"
+    address = $local_data["boot_server_override"] || get_server_from_dhcp_opts || get_default_gateway
+    return ["https://#{ address }/api/firmware_update", address =~ Resolv::AddressRegex ]
 end
 
 def get_pifi_url
-    "https://#{ $local_data["boot_server_override"] || get_server_from_dhcp_opts || $default_gateway }/pifi"
+    address = $local_data["boot_server_override"] || get_server_from_dhcp_opts || get_default_gateway
+    return ["https://#{ address }/pifi", address =~ Resolv::AddressRegex ]
 end
 
 ETH0_MAC=get_if_mac("eth0")
 
-def post_to_url(path, params:{}, follow_redirects:0, allow_file:false, &block)
+def post_to_url(path, params:{}, follow_redirects:0, allow_file:false, no_verify_ssl:NO_VERIFY_SSL, &block)
     uri = URI.parse(path)
     # puts("POSTting URI: #{uri.to_s}")
     http = Net::HTTP.new(uri.hostname,uri.port)
+    http.max_retries = 3
     http.use_ssl = true if uri.instance_of? URI::HTTPS
-    http.verify_mode = OpenSSL::SSL::VERIFY_NONE if NO_VERIFY_SSL
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE if no_verify_ssl
     req = Net::HTTP::Post.new(uri)
     req.body = params.to_json
     req.content_type = 'application/json'
@@ -100,20 +119,21 @@ def post_to_url(path, params:{}, follow_redirects:0, allow_file:false, &block)
     end
     
     if (resp["location"].include?("disposition=attachment") && allow_file)
-        return open(resp['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) {|io| yield(io, true)} if NO_VERIFY_SSL
+        return open(resp['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) {|io| yield(io, true)} if no_verify_ssl
         return open(resp['location'], "rb") {|io| yield(io, true)}
     end
 
-    return post_to_url(resp['location'], params:params, follow_redirects:follow_redirects-1, &block)
+    return post_to_url(resp['location'], params:params, follow_redirects:follow_redirects-1, no_verify_ssl:no_verify_ssl, &block)
 end
 
-def get_from_url(path, params:nil, follow_redirects:0, allow_file:false, &block)
+def get_from_url(path, params:nil, follow_redirects:0, allow_file:false, no_verify_ssl:NO_VERIFY_SSL, &block)
     uri = URI.parse(path)
     uri.query = params.collect { |k,v| "#{k}=#{CGI::escape(v.to_s)}" }.join('&') if not params.nil?
     # puts("GETting URI: #{uri.to_s}")
     http = Net::HTTP.new(uri.hostname, uri.port)
+    http.max_retries = 3
     http.use_ssl = true if uri.instance_of? URI::HTTPS
-    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE if no_verify_ssl
     req = Net::HTTP::Get.new(uri)
     resp = http.request(req)
 
@@ -123,18 +143,20 @@ def get_from_url(path, params:nil, follow_redirects:0, allow_file:false, &block)
     end
 
     if (resp["location"].include?("disposition=attachment") && allow_file)
-        return open(resp['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) {|io| yield(io, true)} if NO_VERIFY_SSL
+        return open(resp['location'], "rb", {ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE}) {|io| yield(io, true)} if no_verify_ssl
         return open(resp['location'], "rb") {|io| yield(io, true)}
     end
-    return get_from_url(resp['location'], params, follow_redirects:follow_redirects-1, &block)
+    return get_from_url(resp['location'], params, follow_redirects:follow_redirects-1, no_verify_ssl:no_verify_ssl, &block)
 end
 
 def post_to_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
-    return post_to_url("#{get_controller_url()}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, &block)
+    controller = get_controller_url()
+    return post_to_url("#{controller[0]}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, no_verify_ssl:controller[1], &block)
 end
 
 def get_from_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
-    return get_from_url("#{get_controller_url()}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, &block)
+    controller = get_controller_url()
+    return get_from_url("#{controller[0]}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, no_verify_ssl:controller[1], &block)
 end
 
 
@@ -151,28 +173,41 @@ def send_rxg_hello_mesg()
              }
     }
     print "Hello: ", body.to_json,"\n"
-    result = post_to_url("#{get_pifi_url}/hello", params:body)
+    pifi_url, pifi_no_ssl = get_pifi_url
+    result = post_to_url("#{pifi_url}/hello", params:body, no_verify_ssl:pifi_no_ssl)
   end
 
 def log_msg(msg)
-    post_to_controller("log_message", params:{'msg' => msg})
+    begin
+        post_to_controller("log_message", params:{'msg' => msg})
+    rescue => exception
+        og_puts "An exception #{exception.class} occurred while sending log message: #{exception.message}. Continuing."
+    end
 end
 
 def send_status(status)
     msg = "#{status} (#{caller_locations[0]})"
     # puts "Informing controller of status: #{msg}"
-    post_to_controller("flash_status", params:{'status' => msg})
+    begin
+        post_to_controller("flash_status", params:{'status' => msg})
+    rescue => exception
+        puts "An exception #{exception.class} occurred while sending status: #{exception.message}. Continuing."
+    end
 end
 
 def ask_controller(endpoint, fail_value=nil )
     puts "Asking controller about #{endpoint}..."
-    res = get_from_controller(endpoint)
-    if res.code == '200'
-        puts "Controller said #{res.body.strip}"
-        return res.body.strip.downcase =~ /true|1|yes/
+    begin
+        res = get_from_controller(endpoint)
+        if res.code == '200'
+            puts "Controller said #{res.body.strip}"
+            return res.body.strip.downcase =~ /true|1|yes/
+        end
+        puts "Non-200 returned: #{res.code} #{res.to_s}"
+        return fail_value
+    rescue => exception
+        og_puts "An exception #{exception.class} occurred while asking controller about #{endpoint}: #{exception.message}. Continuing."
     end
-    puts "Non-200 returned: #{res.code} #{res.to_s}"
-    return fail_value
 end
 
 class SysExecError < StandardError
@@ -203,18 +238,24 @@ class CommunicationError < StandardError
     end
 end
 
+class InvalidControllerError < StandardError
+    def initialize(msg="Tried to talk to an invalid controller!")
+        super(msg)
+    end
+end
+
 def set_exit enable
     if enable
       define_method :system do |*args|
         res = Kernel.system *args
-        puts "Exec: #{args}"
+        # puts "Exec: #{args}"
         raise SysExecError.new("Error executing system command \"#{args}\": (#{$?.exitstatus})",args.to_s, res, $?.exitstatus, caller_locations) unless $?.success?
         return res
         # exit $?.exitstatus unless $?.success?
       end
       define_method :` do |args|
         define_method :backtick_method , Kernel.instance_method(:`)
-        puts "Exec: #{args}"
+        # puts "Exec: #{args}"
         res = backtick_method args
         raise SysExecError.new("Error executing backtick command \"#{args}\": (#{$?.exitstatus})",args.to_s, res, $?.exitstatus, caller_locations) unless $?.success?
         return res
@@ -403,7 +444,7 @@ def flash_os_image
         puts "Exception: #{exception.inspect}\n\t#{exception.backtrace.join("\n\t")}"
         return false
     rescue Exception => exception
-        send_status puts "An unknown error occurred while flashing: #{exception} #{exception.message}"
+        send_status puts "An unknown error occurred while flashing: #{exception.class} -> #{exception.message}"
         puts "Exception: #{exception.inspect}\n\t#{exception.backtrace.join("\n\t")}"
         return false
     end
@@ -415,12 +456,27 @@ def wait_for_ethernet
     while !system('ifconfig eth0 | grep "inet addr:" > /dev/null 2>&1')
         puts "Waiting for address..."
         sleep 5
+        current_wait += 5
         if current_wait > MAX_BOOT_ADDRESS_WAIT && $local_data["last_flash_success"]
             puts "Maximum wait exceeded, booting old image."
             sleep 5
             do_boot
         end
     end
+    sleep 1
+    # puts `ifconfig eth0 | grep "inet addr:"`
+end
+
+def found_valid_controller?
+    valid = false
+    begin
+        resp = get_from_controller('')
+        valid = resp.kind_of?(Net::HTTPSuccess)
+    rescue
+        valid = false
+    end
+    puts "#{get_controller_url()[0]} is not a valid controller!" unless valid 
+    return valid
 end
 
 def do_boot
@@ -447,8 +503,6 @@ end
 load_local_data
 $local_data["boot_exec_times"].append(Time.now)
 $local_data["boot_exec_times"] = $local_data["boot_exec_times"].last(BOOT_EXEC_MAX_ENTRIES)
-
-
 # TODO: Check for thrashing 
 
 # Handle first boot tasks like saving ssh keys
@@ -458,15 +512,16 @@ if $local_data["first_boot"]
     `filetool.sh -b`
 end
 
-wait_for_ethernet
-send_rxg_hello_mesg
-sleep 1
-
-save_local_data
 while true
     begin
+        wait_for_ethernet
+        raise InvalidControllerError.new unless found_valid_controller?
         send_status puts("RG Loader Online")
-        puts "Controller URL: #{get_controller_url}"
+
+        send_rxg_hello_mesg
+        puts `ifconfig eth0 | grep "inet addr:"`
+        puts "Controller URL: #{get_controller_url[0]}"
+        puts "Pifi URL:       #{get_pifi_url[0]}"
         # Decide whether to pull and flash or just go straight to boot.
         should_flash = ask_controller('do_flash', false)
         if should_flash
@@ -479,12 +534,17 @@ while true
         end
         do_boot
         sleep 10
-        # If we get here, do_boot has decided not to boot and we need to cycle again.
-        wait_for_ethernet
-        send_rxg_hello_mesg
+        # If we get here, do_boot has decided not to boot and we need to cycle again. 
+
+    rescue InvalidControllerError => e
+        puts "#{e.class}: #{e.message}"
+        do_boot
+        puts "Unable to boot. Waiting for valid controller."
+        sleep 10
     rescue => exception
-        puts "An exception #{exception} occurred while looping: #{exception.message}"
+        puts "An exception #{exception.class} occurred while looping: #{exception.message}"
         puts "Stubbornly refusing to die."
+        sleep 5
     end
 end
 
