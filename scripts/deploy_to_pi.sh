@@ -14,6 +14,8 @@ sleep 5
 if [ -b "${TARGET_DEVICE}1" ]; then
     echo "Target device ${TARGET_DEVICE}1 found, writing..."
     sudo dd if="$WORK_PATH/$NEW_IMAGE_NAME.img" of=$TARGET_DEVICE bs=4M status=progress
+    sync
+    sleep 5
     echo "Switching SD-MUX $SD_MUX_SERIAL back to DUT"
     sudo sd-mux-ctrl --device-serial=$SD_MUX_SERIAL --dut
 else

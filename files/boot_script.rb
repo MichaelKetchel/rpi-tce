@@ -72,7 +72,7 @@ def get_server_from_dhcp_opts
         option_hash = digest_option_43_from_dec(raw_option_payload.scan(/../).map(&:hex))
         return option_hash[FIRMWARE_SERVER_DHCP_SUB_OPTION]&.pack('C*')
     else
-        puts("Not controller defined in dhcp:")
+        # puts("No controller defined in dhcp.")
         return nil
     end
 end
@@ -431,6 +431,10 @@ def flash_os_image
         (0..7).each do |part_num|
             `sudo sed -i 's/PARTUUID=#{img_blkid_partuuid}-0#{part_num}/PARTUUID=#{boot_blkid_partuuid}-0#{part_num + 2}/g' /mnt/mmcblk0p4/etc/fstab`
         end
+        # send_status puts "Updating config.txt"
+        # `echo 'framebuffer_width=1280' | sudo tee -a /mnt/mmcblk0p3/config.txt`
+        # `echo 'framebuffer_height=720' | sudo tee -a /mnt/mmcblk0p3/config.txt`
+
         set_exit false
         return true
 

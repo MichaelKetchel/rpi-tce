@@ -17,6 +17,7 @@ SSH_ADDRESS="mdk@flashpi.local"
 # Relay pins on [4, 22, 6, 26]
 
 CM4_SERIAL_ID="ID_USB_SERIAL=RPi-MSD-_0001_9a18329a-0:0"
+CM4_SERIAL_ID="ID_USB_SERIAL=RPi-MSD-_0001_"
 
 # power cycle the CM4 board into flash mode.
 cm4_set_flash () {
