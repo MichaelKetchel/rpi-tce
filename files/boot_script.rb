@@ -32,7 +32,11 @@ $local_data = {
     "first_boot" => true,
     "remote_log" => false,
     "boot_server_override" => nil,
+    "boot_server_fallback" => 'piglet.rgnets.com',
 }
+# This should stay nil until regular controller location fails and we switch to it
+$fallback_controller = nil
+
 
 alias :og_puts :puts
 
@@ -88,13 +92,13 @@ def get_os()
     return os.strip
 end
 
-def get_controller_url
-    address = $local_data["boot_server_override"] || get_server_from_dhcp_opts || get_default_gateway
+def get_controller_url(address:nil)
+    address = ( $local_data["boot_server_override"] || get_server_from_dhcp_opts || $fallback_controller || get_default_gateway) unless address
     return ["https://#{ address }/api/firmware_update", address =~ Resolv::AddressRegex ]
 end
 
-def get_pifi_url
-    address = $local_data["boot_server_override"] || get_server_from_dhcp_opts || get_default_gateway
+def get_pifi_url(address:nil)
+    address = ($local_data["boot_server_override"] || get_server_from_dhcp_opts || $fallback_controller || get_default_gateway) unless address
     return ["https://#{ address }/pifi", address =~ Resolv::AddressRegex ]
 end
 
@@ -149,13 +153,13 @@ def get_from_url(path, params:nil, follow_redirects:0, allow_file:false, no_veri
     return get_from_url(resp['location'], params, follow_redirects:follow_redirects-1, no_verify_ssl:no_verify_ssl, &block)
 end
 
-def post_to_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
-    controller = get_controller_url()
+def post_to_controller(path, params:{}, follow_redirects:0, allow_file:false, controller:nil, &block)
+    controller = get_controller_url() if controller.nil?
     return post_to_url("#{controller[0]}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, no_verify_ssl:controller[1], &block)
 end
 
-def get_from_controller(path, params:{}, follow_redirects:0, allow_file:false, &block)
-    controller = get_controller_url()
+def get_from_controller(path, params:{}, follow_redirects:0, allow_file:false, controller:nil, &block)
+    controller = get_controller_url() if controller.nil?
     return get_from_url("#{controller[0]}/#{path}", params:params.merge({"mac":ETH0_MAC, "model": RPI_MODEL}), follow_redirects:follow_redirects, allow_file:allow_file, no_verify_ssl:controller[1], &block)
 end
 
@@ -280,10 +284,14 @@ def load_local_data
     mounted = `mount` =~ /#{BOOT_DATA_PART.gsub('/','\/')} on/
     `mount #{BOOT_DATA_PART}` unless mounted
     if File.file?(LOCAL_DATA_FILE)
+        puts "Found #{LOCAL_DATA_FILE}"
         File.open (LOCAL_DATA_FILE) do |f|
-            $local_data.merge!(JSON.load(f))
+            json_data = JSON.load(f)
+            puts "BL Data: #{json_data}"
+            $local_data.merge!(json_data)
         end        
     else
+        puts "Could not find #{LOCAL_DATA_FILE}, creating fresh."
         save_local_data
     end
     `umount #{BOOT_DATA_PART}` unless mounted
@@ -471,15 +479,15 @@ def wait_for_ethernet
     # puts `ifconfig eth0 | grep "inet addr:"`
 end
 
-def found_valid_controller?
+def found_valid_controller?(controller:nil)
     valid = false
     begin
-        resp = get_from_controller('')
+        resp = get_from_controller('', controller:controller)
         valid = resp.kind_of?(Net::HTTPSuccess)
     rescue
         valid = false
     end
-    puts "#{get_controller_url()[0]} is not a valid controller!" unless valid 
+    puts "#{get_controller_url(address:controller)[0]} is not a valid controller!" unless valid
     return valid
 end
 
@@ -505,9 +513,10 @@ end
 
 # Load local data, make note of our boot time, and check the last n times to make sure we're not thrashing
 load_local_data
+puts "Local data loaded: #{$local_data}"
 $local_data["boot_exec_times"].append(Time.now)
 $local_data["boot_exec_times"] = $local_data["boot_exec_times"].last(BOOT_EXEC_MAX_ENTRIES)
-# TODO: Check for thrashing 
+# TODO: Check for thrashing
 
 # Handle first boot tasks like saving ssh keys
 if $local_data["first_boot"]
@@ -519,7 +528,17 @@ end
 while true
     begin
         wait_for_ethernet
-        raise InvalidControllerError.new unless found_valid_controller?
+        unless found_valid_controller?
+            # Try overriding with fallback
+            puts "Unable to find valid controller. Attempting to use fallback."
+            $fallback_controller = $local_data["boot_server_fallback"]
+            unless found_valid_controller?
+                # Fallback server failed as well. Unset and raise.
+                puts "Fallback was invalid."
+                $fallback_controller = nil
+                raise InvalidControllerError.new
+            end
+        end
         send_status puts("RG Loader Online")
 
         send_rxg_hello_mesg

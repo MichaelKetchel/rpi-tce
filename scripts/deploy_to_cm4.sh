@@ -58,8 +58,13 @@ cm4_do_flash () {
 # Only do the flash. This assumes you've already run 'rpiusbboot' and plugged in the pi.
 cm4_flash_only () {
     CM4_DEV=$(find /dev -regex '/dev/sd.' | xargs -I % bash -c "udevadm info % | grep -q '$CM4_SERIAL_ID' && echo %")
-    echo "sudo dd if=$1 of=$CM4_DEV bs=8M status=progress"
-    sudo dd if=$1 of="$CM4_DEV" bs=8M status=progress
+    if [ "$#" -eq 3 ]; then
+      echo "sudo dd if=$1 of=$CM4_DEV bs=$2 count=$3 status=progress"
+      sudo dd if=$1 of="$CM4_DEV" bs=$2 count=$3 status=progress
+    else
+      echo "sudo dd if=$1 of=$CM4_DEV bs=8M status=progress"
+      sudo dd if=$1 of="$CM4_DEV" bs=8M status=progress
+    fi
     sync
 }
 

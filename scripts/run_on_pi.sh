@@ -33,6 +33,7 @@ setup () {
         echo "User extracted from address: ${address_parts[0]}"
         case "${address_parts[0]}" in
             tc) echo 'Setting up as piCore'; sshpass -p piCore ssh-copy-id -o StrictHostKeyChecking=no  "$SSH_ADDRESS" && ssh $SSH_ADDRESS -t 'sh -lc "filetool.sh -b"' ;;
+            romeo) echo 'Setting up as piglet'; sshpass -p g30rg3 ssh-copy-id -o StrictHostKeyChecking=no "$SSH_ADDRESS" ;;
             pi|*) echo 'Setting up as piglet'; sshpass -p raspberry ssh-copy-id -o StrictHostKeyChecking=no "$SSH_ADDRESS" ;;
         esac
     fi
