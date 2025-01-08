@@ -26,13 +26,13 @@ cd $KERNEL_SOURCE_PATH
 # git reset --hard HEAD
 # git clean -f 
 
-# patch -Np1 -i ../patches/squashfs-warning.patch
-# patch -Np1 -i ../patches/logo.patch
+ patch -Np1 -i ../patches/squashfs-warning.patch
+ patch -Np1 -i ../patches/logo.patch
 
 
  make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
 
- # CONFIG_LOCALVERSION="-piCore-rgnets-v8"
+#export CONFIG_LOCALVERSION="-piCore-rgnets-v8"
 
 xz -fkd $SOURCES_PATH/6.1.68-piCore-v8_.config.xz
 cp $SOURCES_PATH/6.1.68-piCore-v8_.config $KERNEL_SOURCE_PATH/.config
@@ -41,10 +41,12 @@ cat << EOT >> $KERNEL_SOURCE_PATH/.config
 CONFIG_KEXEC=y
 CONFIG_KEXEC_FILE=y
 EOT
-
+ok
+echo "Making olddefconfig"
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
 mkdir -p $ARTIFACTS_PATH
+echo "Making modules_install"
 sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$ARTIFACTS_PATH/built_modules modules_install
 sudo mkdir -p $ARTIFACTS_PATH/boot/overlays
 sudo cp arch/arm64/boot/dts/broadcom/*.dtb $ARTIFACTS_PATH/boot/
@@ -54,6 +56,7 @@ sudo cp arch/arm64/boot/Image $ARTIFACTS_PATH/boot/$KERNEL.img
 
 # depmod -a -b /tmp/extract 5.4.51-piCore-v7
 # depmod -a -b built_modules/ -E linux/Module.symvers -F linux/System.map 6.1.68-piCore-v8
+echo "Doing depmod"
 sudo depmod -a -b $ARTIFACTS_PATH/built_modules/ -E $KERNEL_SOURCE_PATH/Module.symvers -F $KERNEL_SOURCE_PATH/System.map "${KERNEL_NAME}"
 #  depmod -a -b built_modules/ -E linux/Module.symvers -F linux/System.map -o artifacts  '6.1.77-piCore-v8+'
 
