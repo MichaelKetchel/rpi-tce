@@ -4,7 +4,7 @@ LABEL authors="michael"
 #ENTRYPOINT ["top", "-b"]
 
 # Install the application dependencies
-COPY requirements.txt ./
+COPY ../../scripts/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 ENTRYPOINT ["python3"]

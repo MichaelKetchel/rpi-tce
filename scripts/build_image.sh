@@ -20,6 +20,7 @@ CORE_NAME="rootfs-piCore64-14.1.gz"
 NEW_IMAGE_PATH=$WORK_PATH/$NEW_IMAGE_NAME.img
 BASE_IMAGE_PATH=$WORK_PATH/$BASE_IMAGE.img
 
+sudo umount -dR $MNT_PATH/* || true
 sudo rm -rf $WORK_PATH/*
 for path in $WORK_PATH $MNT_PATH $BOOT_PATH $DATA_PATH; do
   mkdir -p $path
@@ -49,7 +50,7 @@ wget -nc http://tinycorelinux.net/14.x/aarch64/releases/RPi/$BASE_IMAGE.zip
 cd $WORK_PATH
 
 
-# mkdir 
+# mkdir
 # sudo find | sudo cpio -o -H newc | gzip -2 > ../tinycore.gz
 
 # unzip exiting image
@@ -132,7 +133,7 @@ print_title "$kpartx_res"
 while IFS= read -r line;
 do
   echo "LINE: '${line}'"
-  loopdev_name=$(grep -oP '(?<=add map ).*?(?=p1)' <<< "${line}")
+  loopdev_name=$(grep -oP '(?<=add map ).*?(?=p1 )' <<< "${line}")
   if [ ! -z "$loopdev_name" ]; then
       break
   fi
@@ -155,7 +156,7 @@ print_title "$kpartx_res"
 while IFS= read -r line;
 do
   echo "LINE: '${line}'"
-  loopdev_name=$(grep -oP '(?<=add map ).*?(?=p1)' <<< "${line}")
+  loopdev_name=$(grep -oP '(?<=add map ).*?(?=p1 )' <<< "${line}")
   if [ ! -z "$loopdev_name" ]; then
       break
   fi
@@ -165,7 +166,7 @@ BASE_LOOPDEV="$loopdev_name"
 # Mount new base
 sudo mount -o rw,sync /dev/mapper/${NEW_LOOPDEV}p1 "$BOOT_PATH"
 
-
+echo "Base loopdev is: ${BASE_LOOPDEV}"
 # Copy data from base image to new one and extend.
 
 #sudo dd if=/dev/mapper/${BASE_LOOPDEV}p1 of=/dev/mapper/${NEW_LOOPDEV}p1
@@ -175,16 +176,18 @@ sudo mount /dev/mapper/${BASE_LOOPDEV}p1 /tmp/basep1
 sudo cp -ar /tmp/basep1/* "$BOOT_PATH"
 sudo umount /tmp/basep1
 
-
+print_title "Copying partition 2"
 sudo dd if=/dev/mapper/${BASE_LOOPDEV}p2 of=/dev/mapper/${NEW_LOOPDEV}p2
 # sudo fatresize /dev/mapper/${NEW_LOOPDEV}p1
 sudo e2fsck -fp /dev/mapper/${NEW_LOOPDEV}p2 || true
 sudo resize2fs /dev/mapper/${NEW_LOOPDEV}p2
 
 # Mount TCE
+print_title "Mounting TCE (partition 2)"
 sudo mount -o rw,sync /dev/mapper/${NEW_LOOPDEV}p2 "$DATA_PATH"
 
 # Detach base image
+print_title "Detaching base image"
 sudo kpartx -dv "${BASE_IMAGE_PATH}"
 
 
@@ -210,13 +213,14 @@ sudo sed -i "s/KERNEL_IMG/kernel8.img/" $BOOT_PATH/config.txt
 
 print_title "Copying in kernel, modules, and device tree files..."
 # sudo install -d -o root -g root -m 755 $BOOT_PATH/overlays
-sudo cp -ar $KERNEL_ARTIFACTS_PATH/boot/* $BOOT_PATH/
+
+sudo cp -r --preserve=mode $KERNEL_ARTIFACTS_PATH/boot/* $BOOT_PATH/
 sudo install -o root -g root -m 755 $PROJECT_PATH/files/cmdline.txt $BOOT_PATH/cmdline.txt
 sudo install -o root -g root -m 755 $KERNEL_ARTIFACTS_PATH/modules*.gz $BOOT_PATH/
 
 # Install TCE packages
 print_title "Installing TCE packages..."
-sudo cp -p $PROJECT_PATH/files/tce/optional/* $DATA_PATH/tce/optional/
+sudo cp --preserve=mode $PROJECT_PATH/files/tce/optional/* $DATA_PATH/tce/optional/
 sudo install -o 1001 -g 50 -m 664 $KEXEC_ARTIFACTS_PATH/kexec_package.tcz $DATA_PATH/tce/optional/kexec.tcz
 sudo install -o 1001 -g 50 -m 664 $REBOOTP_ARTIFACTS_PATH/rebootp.tcz $DATA_PATH/tce/optional/rebootp.tcz
 
@@ -256,7 +260,7 @@ sudo install -o 0 -g 50 -m 775 $PROJECT_PATH/files/boot_script.rb opt/bootscript
 echo "Configuring DHCP and DHCP hooks"
 sudo install -o 0 -g 50 -m 775 $PROJECT_PATH/files/dhcp_hook.sh opt/dhcp_hook.sh
 sudo sed -i '$ d' usr/share/udhcpc/default.script
-sudo echo 'if test -f /opt/dhcp_hook.sh; then . /opt/dhcp_hook.sh; fi' >> usr/share/udhcpc/default.script
+sudo echo 'if test -f /opt/dhcp_hook.sh; then . /opt/dhcp_hook.sh; fi' | sudo tee -a usr/share/udhcpc/default.script
 sudo sed -i -E 's|(/sbin/udhcpc)|\1 -V "RG Nets" -O 43|' etc/init.d/dhcp.sh
 # read -n 1 -p "Ready to repack core. Continue?"
 
