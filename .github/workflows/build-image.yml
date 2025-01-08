@@ -38,6 +38,14 @@ jobs:
         with:
           fetch-depth: '0'
 
+      - name: Get Kernel Sources
+        id: get-kernel-sources
+        run: ./kernel/get_sources.sh
+
+      - name: Build Kernel Sources
+        id: build-kernel-sources
+        run: ./kernel/build_kernel.sh
+
 
       - name: Build image
         id: build-image
