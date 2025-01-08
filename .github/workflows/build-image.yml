@@ -53,6 +53,11 @@ jobs:
           tar -C kernel_source/ -xvf sources/rpi-linux-6.1.68.tar.xz 
           git clone --depth=1 --branch rpi-6.1.y https://github.com/raspberrypi/linux
 
+      - name: Install Dependencies
+        id: install-deps
+        run: |
+          apt-get install gcc-aarch64-linux-gnu
+
       - name: Build Kernel Sources
         id: build-kernel-sources
         run: ./kernel/build_kernel.sh
