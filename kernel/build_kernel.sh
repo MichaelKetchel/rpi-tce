@@ -41,7 +41,7 @@ cat << EOT >> $KERNEL_SOURCE_PATH/.config
 CONFIG_KEXEC=y
 CONFIG_KEXEC_FILE=y
 EOT
-ok
+
 echo "Making olddefconfig"
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
