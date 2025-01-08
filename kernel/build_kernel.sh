@@ -34,15 +34,15 @@ cd $KERNEL_SOURCE_PATH
 
  # CONFIG_LOCALVERSION="-piCore-rgnets-v8"
 
- xz -fkd $SOURCES_PATH/6.1.68-piCore-v8_.config.xz
- cp $SOURCES_PATH/6.1.68-piCore-v8_.config $KERNEL_SOURCE_PATH/.config
+xz -fkd $SOURCES_PATH/6.1.68-piCore-v8_.config.xz
+cp $SOURCES_PATH/6.1.68-piCore-v8_.config $KERNEL_SOURCE_PATH/.config
 
- cat <<EOT >> $KERNEL_SOURCE_PATH/.config
- CONFIG_KEXEC=y
- CONFIG_KEXEC_FILE=y
- EOT
+cat << EOT >> $KERNEL_SOURCE_PATH/.config
+CONFIG_KEXEC=y
+CONFIG_KEXEC_FILE=y
+EOT
 
- make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
 mkdir -p $ARTIFACTS_PATH
 sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$ARTIFACTS_PATH/built_modules modules_install
