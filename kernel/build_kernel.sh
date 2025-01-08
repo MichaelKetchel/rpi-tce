@@ -7,7 +7,7 @@ SOURCES_PATH="$SCRIPT_PATH/sources"
 KERNEL_SOURCE_PATH="$SCRIPT_PATH/linux"
 ARTIFACTS_PATH="$SCRIPT_PATH/artifacts"
 CORE_COUNT=$(cat /proc/cpuinfo | grep processor | wc -l)
-# tar -C kernel_source/ -xvf sources/rpi-linux-6.1.68.tar.xz 
+# tar -C kernel_source/ -xvf sources/rpi-linux-6.1.68.tar.xz
 # git clone --depth=1 --branch rpi-6.1.y https://github.com/raspberrypi/linux
 
 KERNEL_SOURCE_COMMIT_HASH="c0169f2c1"
@@ -30,19 +30,19 @@ cd $KERNEL_SOURCE_PATH
 # patch -Np1 -i ../patches/logo.patch
 
 
-# make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
+ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
 
-# # CONFIG_LOCALVERSION="-piCore-rgnets-v8"
+ # CONFIG_LOCALVERSION="-piCore-rgnets-v8"
 
-# xz -fkd $SOURCES_PATH/6.1.68-piCore-v8_.config.xz
-# cp $SOURCES_PATH/6.1.68-piCore-v8_.config $KERNEL_SOURCE_PATH/.config
+ xz -fkd $SOURCES_PATH/6.1.68-piCore-v8_.config.xz
+ cp $SOURCES_PATH/6.1.68-piCore-v8_.config $KERNEL_SOURCE_PATH/.config
 
-# cat <<EOT >> $KERNEL_SOURCE_PATH/.config
-# CONFIG_KEXEC=y
-# CONFIG_KEXEC_FILE=y
-# EOT
+ cat <<EOT >> $KERNEL_SOURCE_PATH/.config
+ CONFIG_KEXEC=y
+ CONFIG_KEXEC_FILE=y
+ EOT
 
-# make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
 mkdir -p $ARTIFACTS_PATH
 sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$ARTIFACTS_PATH/built_modules modules_install
