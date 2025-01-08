@@ -5,6 +5,8 @@ SCRIPT_PATH=$(dirname $SCRIPT)
 source $SCRIPT_PATH/common.sh
 cd $PROJECT_PATH
 
+SOURCES_PATH="$(pwd)/sources"
+
 MNT_PATH="$WORK_PATH/mnt/"
 BOOT_PATH="$MNT_PATH/boot"
 DATA_PATH="$MNT_PATH/data"
