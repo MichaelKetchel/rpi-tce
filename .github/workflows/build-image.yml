@@ -118,9 +118,9 @@ jobs:
 #        with:
 #          name: ${{ env.ARTIFACT_NAME }}-buildlogs
 #          path: deploy/*.log
-
-      - name: Chown the dir for next time
-        if: always()
-        run: |
-          sudo chown -R ubuntu:ubuntu ./*
-
+#
+#      - name: Chown the dir for next time
+#        if: always()
+#        run: |
+#          sudo chown -R ubuntu:ubuntu ./*
+#

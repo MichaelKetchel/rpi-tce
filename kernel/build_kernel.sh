@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# set -e 
+set -e
 SCRIPT=$(realpath $0)
 SCRIPT_PATH=$(dirname $SCRIPT)
 KERNEL_VERSION="6.1.77"
@@ -15,6 +15,12 @@ KERNEL_SOURCE_COMMIT_HASH="c0169f2c1"
 KERNEL=kernel8
 CONFIG_LOCALVERSION="-piCore-v8"
 KERNEL_NAME="${KERNEL_VERSION}-piCore-v8+"
+echo "PWD:"
+pwd
+echo "LS PWD:"
+ls
+echo "LS MNT:"
+ls /mnt
 
 cd $KERNEL_SOURCE_PATH
 # git reset --hard HEAD
