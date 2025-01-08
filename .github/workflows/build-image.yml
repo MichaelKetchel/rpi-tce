@@ -40,7 +40,10 @@ jobs:
 
       - name: Get Kernel Sources
         id: get-kernel-sources
-        run: ./kernel/get_sources.sh
+        run: |
+          ./kernel/get_sources.sh
+          ls
+          ls ./kernel/
 
       - name: Build Kernel Sources
         id: build-kernel-sources
