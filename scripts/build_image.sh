@@ -5,7 +5,7 @@ SCRIPT_PATH=$(dirname $SCRIPT)
 source $SCRIPT_PATH/common.sh
 cd $PROJECT_PATH
 
-SOURCES_PATH="$(pwd)/sources"
+#SOURCES_PATH="$(pwd)/sources"
 
 MNT_PATH="$WORK_PATH/mnt/"
 BOOT_PATH="$MNT_PATH/boot"
@@ -37,8 +37,7 @@ done
 # $PROJECT_PATH/kexec/run_remote_build.sh
 
 # $PROJECT_PATH/get_sources.sh
-pwd
-ls
+mkdir -p $SOURCES_PATH
 cd $SOURCES_PATH
 wget -nc http://tinycorelinux.net/14.x/aarch64/releases/RPi/$BASE_IMAGE.zip
 
