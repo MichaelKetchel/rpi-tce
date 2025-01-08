@@ -29,7 +29,7 @@ cd $KERNEL_SOURCE_PATH
  patch -Np1 -i ../patches/squashfs-warning.patch
  patch -Np1 -i ../patches/logo.patch
 
-
+echo "making bcm2711_defconfig "
  make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
 
 #export CONFIG_LOCALVERSION="-piCore-rgnets-v8"
@@ -42,8 +42,8 @@ CONFIG_KEXEC=y
 CONFIG_KEXEC_FILE=y
 EOT
 
-echo "Making olddefconfig"
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+#echo "Making olddefconfig"
+#make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
 mkdir -p $ARTIFACTS_PATH
 echo "Making modules_install"
