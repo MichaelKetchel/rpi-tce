@@ -35,7 +35,8 @@ done
 # $PROJECT_PATH/kexec/run_remote_build.sh
 
 # $PROJECT_PATH/get_sources.sh
-
+pwd
+ls
 cd $SOURCES_PATH
 wget -nc http://tinycorelinux.net/14.x/aarch64/releases/RPi/$BASE_IMAGE.zip
 
