@@ -6,4 +6,4 @@ source $SCRIPT_PATH/common.sh
 cd $PROJECT_PATH
 
 docker build -t rpi-tce-builder docker/builder/
-docker run --privileged -v /dev:/dev -it -v./:/mnt  rpi-tce-builder ./scripts/build_image.sh
+docker run --privileged -v /dev:/dev -t -v./:/mnt  rpi-tce-builder ./scripts/build_image.sh
