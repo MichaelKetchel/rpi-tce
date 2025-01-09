@@ -52,10 +52,10 @@ echo "Making modules_install"
 sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$ARTIFACTS_PATH/built_modules modules_install
 echo "Copying in dtbs"
 sudo mkdir -p $ARTIFACTS_PATH/boot/overlays
-sudo cp arch/arm64/boot/dts/broadcom/*.dtb $ARTIFACTS_PATH/boot/
-sudo cp arch/arm64/boot/dts/overlays/*.dtb* $ARTIFACTS_PATH/boot/overlays/
-sudo cp arch/arm64/boot/dts/overlays/README $ARTIFACTS_PATH/boot/overlays/
-sudo cp arch/arm64/boot/Image $ARTIFACTS_PATH/boot/$KERNEL.img
+sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/dts/broadcom/*.dtb $ARTIFACTS_PATH/boot/
+sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/dts/overlays/*.dtb* $ARTIFACTS_PATH/boot/overlays/
+sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/dts/overlays/README $ARTIFACTS_PATH/boot/overlays/
+sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/Image $ARTIFACTS_PATH/boot/$KERNEL.img
 
 # depmod -a -b /tmp/extract 5.4.51-piCore-v7
 # depmod -a -b built_modules/ -E linux/Module.symvers -F linux/System.map 6.1.68-piCore-v8
