@@ -112,8 +112,8 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: |
-            work/rg-piCore.img.gz
-            work/rg-piCore.img.gz.sha256
+            work/rg-piCore64.img.gz
+            work/rg-piCore64.img.gz.sha256
 
 #
 #      - name: Create pre-release from default branch
