@@ -55,6 +55,15 @@ sudo mkdir -p $ARTIFACTS_PATH/boot/overlays
 sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/dts/broadcom/*.dtb $ARTIFACTS_PATH/boot/
 sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/dts/overlays/*.dtb* $ARTIFACTS_PATH/boot/overlays/
 sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/dts/overlays/README $ARTIFACTS_PATH/boot/overlays/
+echo "\n\n $KERNEL_SOURCE_PATH/"
+ls $KERNEL_SOURCE_PATH/
+echo "\n\n $KERNEL_SOURCE_PATH/arch/"
+ls $KERNEL_SOURCE_PATH/arch/
+echo "\n\n $KERNEL_SOURCE_PATH/arch/arm64/"
+ls $KERNEL_SOURCE_PATH/arch/arm64/
+echo "\n\n $KERNEL_SOURCE_PATH/arch/arm64/boot/"
+ls $KERNEL_SOURCE_PATH/arch/arm64/boot/
+
 sudo cp $KERNEL_SOURCE_PATH/arch/arm64/boot/Image $ARTIFACTS_PATH/boot/$KERNEL.img
 
 # depmod -a -b /tmp/extract 5.4.51-piCore-v7
