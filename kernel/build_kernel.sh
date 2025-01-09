@@ -47,7 +47,7 @@ make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
 mkdir -p $ARTIFACTS_PATH
 echo "Making modules"
-sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$ARTIFACTS_PATH/built_modules bzImage modules dtbs
+sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$ARTIFACTS_PATH/built_modules modules dtbs
 echo "Making modules_install"
 sudo make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=$ARTIFACTS_PATH/built_modules modules_install
 echo "Copying in dtbs"
