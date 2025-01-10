@@ -111,9 +111,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: |
-            work/rg-piCore64.img.gz
-            work/rg-piCore64.img.gz.sha256
+          path: work
 
 #
 #      - name: Create pre-release from default branch
