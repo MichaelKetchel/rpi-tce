@@ -103,14 +103,20 @@ jobs:
         id: date
         run: echo "date=$(date -u +'%Y%m%d')" >> $GITHUB_ENV
 
-#      - name: Set nightly artifact name
-#        id: set-nightly-artifact-name
-#        run: echo "ARTIFACT_NAME=wlanpi-nightly-${{ env.version }}~gha${{ env.date }}" >> $GITHUB_ENV
+      - name: Set hash
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Set nightly artifact name
+        id: set-nightly-artifact-name
+        #run: echo "ARTIFACT_NAME=wlanpi-nightly-${{ env.version }}~gha${{ env.date }}" >> $GITHUB_ENV
+        run: echo "ARTIFACT_NAME=rg-loader-ondemand-${{ env.sha_short }}~gha${{ env.date }}" >> $GITHUB_ENV
 
       - name: Upload image
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
+          #name: ${{ env.ARTIFACT_NAME }}
           path: |
             work/*.gz
             work/*.sha256
