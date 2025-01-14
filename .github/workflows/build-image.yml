@@ -40,7 +40,7 @@ jobs:
       - uses: LIT-Protocol/artifact-exists-action@v0
         id: check_exists
         with:
-          name: "kernel-${{TARGET_KERNEL}}"
+          name: "kernel-${{env.TARGET_KERNEL}}"
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -89,7 +89,7 @@ jobs:
         if: env.build_kernel == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: "kernel-${{TARGET_KERNEL}}"
+          name: "kernel-${{env.TARGET_KERNEL}}"
           path: ./kernel
           retention-days: 30
 
@@ -114,7 +114,7 @@ jobs:
       - name: Download kernel artifact
         uses: actions/download-artifact@v4
         with:
-          name: "kernel-${{TARGET_KERNEL}}"
+          name: "kernel-${{env.TARGET_KERNEL}}"
           path: ./kernel
 
       - name: Build image
