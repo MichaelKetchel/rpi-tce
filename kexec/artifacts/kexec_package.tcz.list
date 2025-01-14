@@ -1,0 +1,4 @@
+usr/local/share/man/man8/vmcore-dmesg.8
+usr/local/share/man/man8/kexec.8
+usr/local/sbin/vmcore-dmesg
+usr/local/sbin/kexec
