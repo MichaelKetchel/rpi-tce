@@ -5,8 +5,6 @@ import subprocess
 import os
 from pprint import pp
 import sys
-from glob import glob
-from logging import getLogger
 import logging
 from typing import Optional
 
@@ -32,12 +30,8 @@ def load_var_from_common(varname:str):
 
 SCRIPT = load_var_from_common("SCRIPT")
 SCRIPT_PATH = load_var_from_common("SCRIPT_PATH")
-PROJECT_PATH = load_var_from_common("PROJECT_PATH")
 WORK_PATH = load_var_from_common("WORK_PATH")
-SOURCES_PATH = load_var_from_common("SOURCES_PATH")
 NEW_IMAGE_NAME = load_var_from_common("NEW_IMAGE_NAME")
-SD_MUX_SERIAL = load_var_from_common("SD_MUX_SERIAL")
-TARGET_DEVICE = load_var_from_common("TARGET_DEVICE")
 
 MNT_PATH=f"{WORK_PATH}/mnt/"
 BOOT_PATH=f"{MNT_PATH}/boot"
